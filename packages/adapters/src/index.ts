@@ -1,3 +1,4 @@
+export { EXTERNAL_CALL_TIMEOUT_MS, withExternalDeadline } from './external-deadline';
 export { KeycloakAccessTokenVerifier } from './keycloak-access-token';
 export { enforceDocumentPolicy, type DocumentPolicy } from './casbin-document-access';
 export {

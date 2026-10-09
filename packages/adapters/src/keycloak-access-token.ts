@@ -6,6 +6,7 @@ import {
 } from '@frs/domain';
 import session from 'express-session';
 import KeycloakConnect from 'keycloak-connect';
+import { withExternalDeadline } from './external-deadline';
 
 type KeycloakTokenContent = {
   sub?: string;
@@ -46,7 +47,9 @@ export class KeycloakAccessTokenVerifier implements AccessTokenVerifier {
   }
 
   async verify(token: string): Promise<AccessTokenClaims> {
-    const grant = await this.keycloak.grantManager.createGrant({ access_token: token });
+    const grant = await withExternalDeadline(
+      this.keycloak.grantManager.createGrant({ access_token: token }),
+    );
     const content = grant.access_token?.content;
     if (!content?.sub || !content.preferred_username) {
       throw new IdentityError();
