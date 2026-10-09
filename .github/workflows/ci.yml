@@ -23,7 +23,7 @@ jobs:
       - run: pnpm test:e2e
         env:
           CI: "true"
-      - run: pnpm audit --prod
+      - run: sh scripts/audit-prod.sh
 
   integration:
     runs-on: ubuntu-latest

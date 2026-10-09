@@ -30,7 +30,7 @@ docker compose up --build
 
 本地口令只写在 `.env.example`，不要换成真实密码后提交 `.env`。
 
-`pnpm audit --prod` 走官方 npm 源时，还会剩下 `keycloak-connect` 间接依赖 `elliptic` 的一条低危公告，上游没有修复版本。这条不作为自研令牌校验的理由。国内镜像源没有 audit 接口，本地会直接报 endpoint 不存在。
+`sh scripts/audit-prod.sh` 会执行 `pnpm audit --prod`。目前唯一放行的是 `GHSA-848j-6mx2-7j84`：`keycloak-connect` 经 `jwk-to-pem` 依赖 `elliptic`，公告写明没有修复版本。出现别的告警仍然失败。不要为此改自研令牌校验。国内镜像没有 audit 接口，这条命令需要走官方 npm 源。
 
 ## 规格
 

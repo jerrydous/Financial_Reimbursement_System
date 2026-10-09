@@ -30,7 +30,7 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm test:integration
-pnpm audit --prod
+sh scripts/audit-prod.sh
 ```
 
 必须存在的机器断言：
