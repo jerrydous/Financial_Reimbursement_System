@@ -115,6 +115,8 @@ export function actorForAction(
   action: ExpenseReportAction,
   assignment: ReportAssignment,
 ): string {
+  // 终态没有当前操作者。先拒绝非法迁移，避免支付成功后的改金额被误报成「没有操作者」。
+  transitionExpenseReport(status, action);
   if (action === 'submit' || action === 'revise' || action === 'withdraw') {
     return assignment.ownerId;
   }
@@ -124,18 +126,7 @@ export function actorForAction(
   if (!assignment.currentActorId) {
     throw new ExpenseReportError('ACTOR_UNASSIGNED', '当前步骤没有操作者');
   }
-  if (
-    action === 'approve' ||
-    action === 'finance_adjust' ||
-    action === 'finance_approve' ||
-    action === 'pay_success' ||
-    action === 'pay_fail' ||
-    action === 'transfer' ||
-    action === 'reject'
-  ) {
-    return assignment.currentActorId;
-  }
-  throw new ExpenseReportError('INVALID_TRANSITION', `不能从 ${status} 执行 ${action}`);
+  return assignment.currentActorId;
 }
 
 export function assertActor(expectedActorId: string, actualActorId: string): void {

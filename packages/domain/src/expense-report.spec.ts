@@ -51,6 +51,9 @@ describe('报销单状态机', () => {
     const approved = applyFinanceAdjustment('finance_review', parseFen('100'), parseFen('80'));
     expect(approved).toBe(80n);
     expect(() => applyFinanceAdjustment('paying', parseFen('80'), parseFen('70'))).toThrow(/不能从 paying/);
+    expect(() =>
+      actorForAction('paid', 'finance_adjust', { ownerId: 'owner', currentActorId: null }),
+    ).toThrow(/不能从 paid/);
     expect(() => assertPaidAmountStable('paid', parseFen('80'), parseFen('70'))).toThrow(/支付成功后/);
     assertPaidAmountStable('finance_review', parseFen('100'), parseFen('80'));
   });
