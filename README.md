@@ -1,66 +1,93 @@
 # 财务报销系统
 
-P0 骨架和 P1 对私闭环可以在本地启动：Keycloak 登录、上传发票、人工确认、提交报销、主管审批、财务改批准金额、出纳确认支付。规格没有点名识票厂商，所以不会自动填入识别结果，也不会把发票标成验真通过。
+单企业、单账套的费控系统。员工提交对私报销，经过发票确认、主管审批、财务审核和出纳支付，留下不能改写的审计记录。金额以整数「分」记账，页面上显示为元。
 
-能力范围参照每刻报销的公开产品能力，不复制其品牌、文案和界面。规格文件仍是实现基线。
+当前可用路径：登录、上传发票、人工确认、提交报销、主管审批、财务修改批准金额、出纳确认支付。系统不会自动填写识别结果，也不会把发票标成验真通过。
 
-## 本地启动
+## 使用说明
 
-当前环境如果没有 Docker，只能跑下面的检查，不能把 Keycloak 和数据库拉起来。
-
-```bash
-cp .env.example .env
-pnpm install
-pnpm typecheck
-pnpm lint
-pnpm test
-pnpm test:e2e
-```
-
-有 Docker 时启动整套依赖和三个进程：
+### 启动
 
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-然后打开 http://localhost:5173 ，用 `employee1` / `employee1` 登录。登录后应看到「示例员工」和「示例公司」。主管、财务、出纳的开发账号是 `manager1`、`finance1`、`cashier1`，口令与账号相同。提交报销需要 Idempotency-Key。同一张已确认发票不能同时进两张有效报销单。支付成功后金额不能再改。
+浏览器打开 http://localhost:5173 。
 
-另一条检查是 `sh scripts/smoke.sh`。它同样要求 Compose 已经起来。
+| 服务 | 地址 |
+|---|---|
+| 网页 | http://localhost:5173 |
+| API | http://localhost:3000 |
+| Keycloak | http://localhost:8088 |
+| MinIO 控制台 | http://localhost:9001 |
 
-本地口令只写在 `.env.example`，不要换成真实密码后提交 `.env`。
+本地开发账号的口令与账号相同，只用于本机：
 
-P1 新增的库都是官方 SDK，用来代替自研：`casbin`（MIT，数据范围）、`@aws-sdk/client-s3`（Apache-2.0，发票原件）、`@temporalio/client`（MIT，单线审批等待）。OpenAPI 由 Zod 对象展开，不再维护第二份字段表。识票仍缺厂商名称，没有接入 OCR SDK。
+| 账号 | 岗位 |
+|---|---|
+| employee1 | 员工 |
+| manager1 | 主管 |
+| finance1 | 财务 |
+| cashier1 | 出纳 |
 
-`sh scripts/audit-prod.sh` 会执行 `pnpm audit --prod`。目前唯一放行的是 `GHSA-848j-6mx2-7j84`：`keycloak-connect` 经 `jwk-to-pem` 依赖 `elliptic`，公告写明没有修复版本。出现别的告警仍然失败。不要为此改自研令牌校验。国内镜像没有 audit 接口，这条命令需要走官方 npm 源。
+未登录不能查看报销单。登录后只能看到自己的员工身份和公司抬头。
 
-## 规格
+### 提交一张报销单
 
-把本仓库交给 AI，并指定它先读 `AGENTS.md`。默认只允许实现当前切片，从 P0 开始。
+1. 用员工账号登录，打开「我的报销」→「新建报销单」。
+2. 上传发票影像（PDF、JPEG 或 PNG），对照影像填写发票代码、发票号码和价税合计。金额写成两位小数，例如 `12.30`。保存后验真状态为「未验真」。
+3. 勾选已确认且尚未占用的发票，提交报销单。
+4. 主管在「待我处理」中同意或驳回。财务审核中可以修改批准金额，原始提交金额仍保留。出纳确认支付。
+5. 单据详情可以按短时链接查看发票影像，并看到每次提交、审批、调整和支付的审计记录。
 
-建议开场指令：
+员工在主管通过之前可以撤回。驳回或撤回后可以改回草稿再提交。同一张已确认发票不能同时进入两张有效报销单。支付成功后金额不能再改。
+
+## 系统架构
+
+网页、接口和审批工作进程分开部署，共用同一套契约和领域规则。
 
 ```text
-先阅读 AGENTS.md、docs/technical-plan.md、docs/quality-gates.md、docs/prohibitions.md、docs/positive-requirements.md。
-把这些文件当作目标基线。只实现 P0。P0 验收通过前，不要写报销单业务页面。
+浏览器
+  │  Keycloak 登录
+  ▼
+apps/web          Vite + React + Ant Design
+  │  HTTP，金额用字符串传递「分」
+  ▼
+apps/api          NestJS。鉴权、事务、单据接口
+  │                 ├── PostgreSQL 16（Prisma）：单据、发票、审计
+  │                 ├── MinIO：发票影像
+  │                 └── Redis：幂等加速，不作为金额依据
+  ▼
+apps/worker       Temporal Worker。审批等待与状态推进
 ```
 
-## 文件
-
-| 文件 | 用途 |
+| 目录 | 职责 |
 |---|---|
-| [AGENTS.md](AGENTS.md) | 执行入口：构建方法、切片顺序、停机条件 |
-| [docs/technical-plan.md](docs/technical-plan.md) | 技术计划：目标、功能、技术栈、胶水映射、数据与状态 |
-| [docs/quality-gates.md](docs/quality-gates.md) | 质量门禁：五层门禁和必须运行的命令 |
-| [docs/prohibitions.md](docs/prohibitions.md) | 禁止清单：胶水、工程、财务 |
-| [docs/positive-requirements.md](docs/positive-requirements.md) | 强制正向要求池，以及生成代码时的硬约束 |
+| `apps/web` | 页面。不访问数据库，不持有对象存储密钥 |
+| `apps/api` | HTTP、事务和鉴权。不在请求里长时间等待审批 |
+| `apps/worker` | 审批流程的等待、同意、驳回和支付推进 |
+| `packages/contracts` | 前后端共用的请求和响应契约 |
+| `packages/domain` | 状态迁移、金额和发票占用规则。不访问网络和数据库 |
+| `packages/adapters` | Keycloak、Temporal、对象存储和数据范围的接入 |
 
-## 依据
+依赖方向：网页只依赖契约；接口和工作进程依赖领域、契约和适配器；领域包不依赖 Web 框架、数据库客户端和工作流 SDK。
 
-- [系统构建](https://github.com/tradecatlabs/vibe-coding-cn/blob/develop/docs/gongfa/system-building.md)
-- [拼好码](https://github.com/tradecatlabs/vibe-coding-cn/blob/develop/docs/gongfa/glue-coding.md)
-- [技术栈](https://github.com/tradecatlabs/vibe-coding-cn/blob/develop/docs/gongfa/technology-stack.md)
-- [质量门禁](https://github.com/tradecatlabs/vibe-coding-cn/blob/develop/docs/gongfa/quality-gates-and-pitfalls.md)
-- [六条核心命题](https://github.com/tradecatlabs/vibe-coding-cn/blob/develop/docs/gongfa/ai-core-propositions.md)
-- [项目架构](https://github.com/tradecatlabs/vibe-coding-cn/blob/develop/docs/gongfa/project-architecture-template.md)
-- [开发流程](https://github.com/tradecatlabs/vibe-coding-cn/blob/develop/docs/gongfa/development-process.md)
+身份由 Keycloak 签发。接口把外部身份映射到员工，再用数据范围限制本人、主管、财务和出纳能看到的单据。发票影像存在 MinIO，浏览器只拿到短时查看地址。
+
+### 报销单状态
+
+```text
+草稿 → 已提交 → 主管审批 → 财务审核 → 待支付 → 已支付
+                  │            │
+                  ├─ 驳回       └─ 驳回
+                  └─ 撤回
+```
+
+驳回和撤回可以回到草稿。财务调整只发生在财务审核，并单独留下调整前后的金额。已支付、驳回、撤回都不做物理删除。
+
+### 金额
+
+数据库里的金额是整数分。接口用字符串传输，避免二进制浮点。报销单金额等于费用行合计。创建报销单和确认支付都带幂等键，重复请求返回第一次的结果。审计记录只追加。
+
+更细的数据边界和后续阶段见 [docs/technical-plan.md](docs/technical-plan.md)。

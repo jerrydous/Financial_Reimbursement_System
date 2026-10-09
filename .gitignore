@@ -9,3 +9,11 @@ apps/api/prisma/*.db
 *.tsbuildinfo
 core
 core.*
+
+# 实现指令与质量要求留在本地，不发布到产品仓库
+/AGENTS.md
+/docs/quality-gates.md
+/docs/prohibitions.md
+/docs/positive-requirements.md
+.cursor/
+.krow/
