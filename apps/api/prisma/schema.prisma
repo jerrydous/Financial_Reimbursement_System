@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id        String     @id
+  tenantId  String     @default("default") @map("tenant_id")
+  name      String
+  taxId     String     @map("tax_id")
+  employees Employee[]
+
+  @@map("companies")
+}
+
+model Employee {
+  id              String          @id
+  tenantId        String          @default("default") @map("tenant_id")
+  keycloakSubject String?         @unique @map("keycloak_subject")
+  username        String          @unique
+  name            String
+  email           String
+  companyId       String          @map("company_id")
+  company         Company         @relation(fields: [companyId], references: [id])
+  expenseReports  ExpenseReport[]
+
+  @@map("employees")
+}
+
+model ExpenseReport {
+  id         String   @id
+  tenantId   String   @default("default") @map("tenant_id")
+  employeeId String   @map("employee_id")
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  status     String
+  amountFen  BigInt   @map("amount_fen")
+  version    Int      @default(1)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([employeeId, createdAt])
+  @@map("expense_reports")
+}
