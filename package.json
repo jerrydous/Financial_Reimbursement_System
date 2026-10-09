@@ -16,6 +16,7 @@
   "pnpm": {
     "overrides": {
       "basic-ftp": "6.2.1",
+      "csv-parse": "7.0.2",
       "deepmerge-ts": "8.0.0"
     }
   },

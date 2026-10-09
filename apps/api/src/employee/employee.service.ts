@@ -5,7 +5,7 @@ import {
   IdentityError,
   type AccessTokenClaims,
 } from '@frs/domain';
-import type { EmployeeView } from '@frs/contracts';
+import { employeeViewSchema, type EmployeeView } from '@frs/contracts';
 import { PrismaService } from '../prisma.service';
 
 const employeeInclude = { company: true } as const;
@@ -15,6 +15,7 @@ type EmployeeRecord = {
   username: string;
   name: string;
   email: string;
+  role: string;
   keycloakSubject: string | null;
   company: { id: string; name: string; taxId: string };
 };
@@ -83,15 +84,16 @@ function asForbidden(error: unknown): unknown {
 }
 
 function toView(employee: EmployeeRecord): EmployeeView {
-  return {
+  return employeeViewSchema.parse({
     id: employee.id,
     username: employee.username,
     name: employee.name,
     email: employee.email,
+    role: employee.role,
     company: {
       id: employee.company.id,
       name: employee.company.name,
       taxId: employee.company.taxId,
     },
-  };
+  });
 }

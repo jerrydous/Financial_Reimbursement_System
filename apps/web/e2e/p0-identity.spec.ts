@@ -1,5 +1,14 @@
 import { expect, test } from '@playwright/test';
 
+test('未登录不能提交报销单', async ({ request }) => {
+  const response = await request.post('/expense-reports', {
+    data: { invoiceIds: ['33333333-3333-4333-8333-333333333333'] },
+    headers: { 'idempotency-key': 'missing-auth' },
+  });
+  expect(response.status()).toBe(401);
+  expect(await response.json()).toEqual({ code: 'AUTH_REQUIRED', message: '需要登录' });
+});
+
 test('未登录不能读取员工身份', async ({ request }) => {
   const response = await request.get('/me');
   expect(response.status()).toBe(401);

@@ -1,6 +1,6 @@
 # 财务报销系统
 
-P0 骨架可以在本地启动：Keycloak 登录、当前员工与公司抬头、空的报销列表。没有提单、审批和支付页面，那些从 P1 开始。
+P0 骨架和 P1 对私闭环可以在本地启动：Keycloak 登录、上传发票、人工确认、提交报销、主管审批、财务改批准金额、出纳确认支付。规格没有点名识票厂商，所以不会自动填入识别结果，也不会把发票标成验真通过。
 
 能力范围参照每刻报销的公开产品能力，不复制其品牌、文案和界面。规格文件仍是实现基线。
 
@@ -24,11 +24,13 @@ cp .env.example .env
 docker compose up --build
 ```
 
-然后打开 http://localhost:5173 ，用 `employee1` / `employee1` 登录。登录后应看到「示例员工」和「示例公司」，报销单列表为空。未登录调用 http://localhost:3000/me 会返回 401。
+然后打开 http://localhost:5173 ，用 `employee1` / `employee1` 登录。登录后应看到「示例员工」和「示例公司」。主管、财务、出纳的开发账号是 `manager1`、`finance1`、`cashier1`，口令与账号相同。提交报销需要 Idempotency-Key。同一张已确认发票不能同时进两张有效报销单。支付成功后金额不能再改。
 
 另一条检查是 `sh scripts/smoke.sh`。它同样要求 Compose 已经起来。
 
 本地口令只写在 `.env.example`，不要换成真实密码后提交 `.env`。
+
+P1 新增的库都是官方 SDK，用来代替自研：`casbin`（MIT，数据范围）、`@aws-sdk/client-s3`（Apache-2.0，发票原件）、`@temporalio/client`（MIT，单线审批等待）。OpenAPI 由 Zod 对象展开，不再维护第二份字段表。识票仍缺厂商名称，没有接入 OCR SDK。
 
 `sh scripts/audit-prod.sh` 会执行 `pnpm audit --prod`。目前唯一放行的是 `GHSA-848j-6mx2-7j84`：`keycloak-connect` 经 `jwk-to-pem` 依赖 `elliptic`，公告写明没有修复版本。出现别的告警仍然失败。不要为此改自研令牌校验。国内镜像没有 audit 接口，这条命令需要走官方 npm 源。
 

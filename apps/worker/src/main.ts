@@ -2,6 +2,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { NativeConnection, Worker } from '@temporalio/worker';
+import * as activities from './activities';
 
 const port = Number(process.env.WORKER_PORT ?? 3001);
 const address = process.env.TEMPORAL_ADDRESS ?? 'localhost:7233';
@@ -27,6 +28,7 @@ async function run(): Promise<void> {
     namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
     taskQueue: 'expense',
     workflowsPath: path.join(__dirname, 'workflows.js'),
+    activities,
   });
   ready = true;
   const shutdown = () => {

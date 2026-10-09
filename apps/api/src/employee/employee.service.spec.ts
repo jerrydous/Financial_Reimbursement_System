@@ -13,6 +13,7 @@ function employee(subject: string | null) {
     username: 'employee1',
     name: '示例员工',
     email: 'employee1@example.com',
+    role: 'employee',
     keycloakSubject: subject,
     company: {
       id: '22222222-2222-4222-8222-222222222222',

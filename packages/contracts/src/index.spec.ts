@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ZodNumber, ZodString } from 'zod';
+import { buildOpenApiDocument } from './openapi';
 import { expenseReportItemSchema, fenStringSchema, pageOffset, pageQuerySchema } from './index';
 
 describe('金额契约', () => {
@@ -16,5 +17,12 @@ describe('金额契约', () => {
     expect(pageQuerySchema.safeParse({ pageSize: '101' }).success).toBe(false);
     expect(pageOffset(1, 20)).toBe(0);
     expect(() => pageOffset(100, 20)).toThrow('PAGE_TOO_DEEP');
+  });
+
+  it('OpenAPI 从 Zod 生成，金额字段是 string', () => {
+    const document = JSON.stringify(buildOpenApiDocument());
+    expect(document).toContain('"amountFen"');
+    expect(document).toContain('"type":"string"');
+    expect(document).not.toContain('"amountFen":{"type":"number"');
   });
 });

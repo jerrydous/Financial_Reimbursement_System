@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   app.useGlobalFilters(new ApiExceptionFilter());
   app.enableCors({
     origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173',
-    allowedHeaders: ['Authorization', 'Content-Type'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
   });
   const port = Number(process.env.API_PORT ?? 3000);
   await app.listen(port);

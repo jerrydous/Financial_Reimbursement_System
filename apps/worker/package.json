@@ -8,7 +8,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@temporalio/worker": "^1.12.1"
+    "@temporalio/activity": "^1.24.0",
+    "@temporalio/worker": "^1.24.0",
+    "@temporalio/workflow": "^1.24.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

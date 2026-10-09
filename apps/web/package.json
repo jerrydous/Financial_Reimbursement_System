@@ -11,13 +11,19 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@frs/contracts": "workspace:*",
+    "@frs/domain": "workspace:*",
+    "@hookform/resolvers": "^5.2.2",
+    "@tanstack/react-query": "^5.90.2",
     "@vitejs/plugin-react": "^4.5.2",
     "antd": "^5.26.2",
     "keycloak-js": "^26.2.0",
+    "react-hook-form": "^7.63.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.2",
-    "vite": "^6.3.5"
+    "vite": "^6.3.5",
+    "zod": "^3.25.67"
   },
   "devDependencies": {
     "@playwright/test": "^1.53.1",

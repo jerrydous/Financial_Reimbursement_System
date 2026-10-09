@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addFen, compareFen, fenToString, parseFen } from './money';
+import { addFen, compareFen, fenToString, fenToYuanText, parseFen, yuanTextToFen } from './money';
 
 describe('金额以整数分计算', () => {
   it('拒绝小数、科学计数和前导零', () => {
@@ -16,5 +16,14 @@ describe('金额以整数分计算', () => {
     expect(fenToString(sum)).toBe('30');
     expect(compareFen(sum, parseFen('30'))).toBe(0);
     expect(compareFen(sum, parseFen('31'))).toBe(-1);
+  });
+
+  it('元的文本按分换算，0.10 加 0.20 等于 30 分', () => {
+    const sum = addFen(yuanTextToFen('0.10'), yuanTextToFen('0.20'));
+    expect(sum).toBe(30n);
+    expect(typeof sum).toBe('bigint');
+    expect(fenToYuanText(sum)).toBe('0.30');
+    expect(() => yuanTextToFen('1.2')).toThrow(/两位小数/);
+    expect(() => yuanTextToFen('1')).toThrow(/两位小数/);
   });
 });

@@ -24,23 +24,146 @@ model Employee {
   username        String          @unique
   name            String
   email           String
+  role            String          @default("employee")
   companyId       String          @map("company_id")
   company         Company         @relation(fields: [companyId], references: [id])
+  managerId       String?         @map("manager_id")
+  manager         Employee?       @relation("EmployeeManager", fields: [managerId], references: [id])
+  directReports   Employee[]      @relation("EmployeeManager")
   expenseReports  ExpenseReport[]
+  invoices        Invoice[]
 
   @@map("employees")
 }
 
 model ExpenseReport {
-  id         String   @id
-  tenantId   String   @default("default") @map("tenant_id")
-  employeeId String   @map("employee_id")
-  employee   Employee @relation(fields: [employeeId], references: [id])
-  status     String
-  amountFen  BigInt   @map("amount_fen")
-  version    Int      @default(1)
-  createdAt  DateTime @default(now()) @map("created_at")
+  id                  String             @id
+  tenantId            String             @default("default") @map("tenant_id")
+  employeeId          String             @map("employee_id")
+  employee            Employee           @relation(fields: [employeeId], references: [id])
+  status              String
+  amountFen           BigInt             @map("amount_fen")
+  currency            String             @default("CNY")
+  submittedAmountFen  BigInt?            @map("submitted_amount_fen")
+  approvedAmountFen   BigInt?            @map("approved_amount_fen")
+  currentStep         String?            @map("current_step")
+  currentActorId      String?            @map("current_actor_id")
+  workflowId          String?            @map("workflow_id")
+  version             Int                @default(1)
+  createdAt           DateTime           @default(now()) @map("created_at")
+  lines               ExpenseLine[]
+  payments            Payment[]
+  adjustments         AmountAdjustment[]
+  auditEvents         AuditEvent[]
+  accesses            DocumentAccess[]
+  invoices            Invoice[]
 
   @@index([employeeId, createdAt])
   @@map("expense_reports")
+}
+
+model Invoice {
+  id                  String        @id
+  tenantId            String        @default("default") @map("tenant_id")
+  ownerEmployeeId     String        @map("owner_employee_id")
+  owner               Employee      @relation(fields: [ownerEmployeeId], references: [id])
+  objectKey           String        @map("object_key")
+  fileSha256          String        @map("file_sha256")
+  contentType         String        @map("content_type")
+  invoiceCode         String        @default("") @map("invoice_code")
+  invoiceNumber       String        @default("") @map("invoice_number")
+  amountFen           BigInt?       @map("amount_fen")
+  recognitionStatus   String        @default("pending_confirmation") @map("recognition_status")
+  verificationStatus  String        @default("unverified") @map("verification_status")
+  binding             String        @default("released")
+  expenseReportId     String?       @map("expense_report_id")
+  expenseReport       ExpenseReport? @relation(fields: [expenseReportId], references: [id])
+  createdAt           DateTime      @default(now()) @map("created_at")
+  lines               ExpenseLine[]
+
+  @@index([ownerEmployeeId, createdAt])
+  @@map("invoices")
+}
+
+model ExpenseLine {
+  id         String        @id
+  reportId   String        @map("report_id")
+  report     ExpenseReport @relation(fields: [reportId], references: [id])
+  invoiceId  String        @map("invoice_id")
+  invoice    Invoice       @relation(fields: [invoiceId], references: [id])
+  amountFen  BigInt        @map("amount_fen")
+
+  @@index([reportId])
+  @@map("expense_lines")
+}
+
+model Payment {
+  id              String        @id
+  tenantId        String        @default("default") @map("tenant_id")
+  reportId        String        @map("report_id")
+  report          ExpenseReport @relation(fields: [reportId], references: [id])
+  amountFen       BigInt        @map("amount_fen")
+  status          String
+  idempotencyKey  String        @map("idempotency_key")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  @@index([reportId])
+  @@map("payments")
+}
+
+model AmountAdjustment {
+  id               String        @id
+  reportId         String        @map("report_id")
+  report           ExpenseReport @relation(fields: [reportId], references: [id])
+  actorId          String        @map("actor_id")
+  beforeAmountFen  BigInt        @map("before_amount_fen")
+  afterAmountFen   BigInt        @map("after_amount_fen")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  @@index([reportId])
+  @@map("amount_adjustments")
+}
+
+model AuditEvent {
+  id               String        @id
+  documentId       String        @map("document_id")
+  report           ExpenseReport @relation(fields: [documentId], references: [id])
+  action           String
+  actorId          String        @map("actor_id")
+  fromStatus       String        @map("from_status")
+  toStatus         String        @map("to_status")
+  workflowId       String?       @map("workflow_id")
+  beforeAmountFen  BigInt?       @map("before_amount_fen")
+  afterAmountFen   BigInt?       @map("after_amount_fen")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  @@index([documentId, createdAt])
+  @@map("audit_events")
+}
+
+model IdempotencyKey {
+  id          String   @id
+  tenantId    String   @default("default") @map("tenant_id")
+  operation   String
+  key         String
+  documentId  String   @map("document_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, operation, key])
+  @@map("idempotency_keys")
+}
+
+model DocumentAccess {
+  id          String        @id
+  actorId     String        @map("actor_id")
+  documentId  String        @map("document_id")
+  report      ExpenseReport @relation(fields: [documentId], references: [id])
+  objectKey   String        @map("object_key")
+  action      String
+  revokedAt   DateTime?     @map("revoked_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  @@index([actorId, action, revokedAt])
+  @@index([documentId])
+  @@map("document_access")
 }

@@ -1,27 +1,24 @@
-import { Button, Descriptions, Layout, Menu, Table, Typography } from 'antd';
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Button, Descriptions, Layout, Menu, Typography } from 'antd';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { getMe, listExpenseReports, type EmployeeView, type ExpenseReportList } from './api';
+import { getMe, type EmployeeView } from './api';
 import { keycloak } from './auth';
+import { NewReportPage, ReportDetailPage, ReportListPage } from './report-pages';
 
 const { Header, Content, Sider } = Layout;
 
 export function App() {
   const location = useLocation();
-  const [employee, setEmployee] = useState<EmployeeView | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!keycloak.authenticated) {
-      return;
-    }
-    void getMe()
-      .then((view) => {
-        setEmployee(view);
-        setError(null);
-      })
-      .catch(() => setError('无法读取当前员工身份'));
-  }, []);
+  const me = useQuery({
+    queryKey: ['me'],
+    enabled: keycloak.authenticated === true,
+    queryFn: getMe,
+  });
+  const selected = location.pathname.startsWith('/expense-reports')
+    ? '/expense-reports'
+    : location.pathname.startsWith('/approvals')
+      ? '/approvals'
+      : '/';
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -30,10 +27,11 @@ export function App() {
         <Sider width={200} theme="light">
           <Menu
             mode="inline"
-            selectedKeys={[location.pathname]}
+            selectedKeys={[selected]}
             items={[
               { key: '/', label: <Link to="/">我的身份</Link> },
-              { key: '/expense-reports', label: <Link to="/expense-reports">报销单</Link> },
+              { key: '/expense-reports', label: <Link to="/expense-reports">我的报销</Link> },
+              { key: '/approvals', label: <Link to="/approvals">待我处理</Link> },
             ]}
           />
         </Sider>
@@ -44,14 +42,17 @@ export function App() {
             </Button>
           )}
           {keycloak.authenticated ? (
-            <Button style={{ marginLeft: 8 }} onClick={() => void keycloak.logout()}>
+            <Button style={{ marginBottom: 16 }} onClick={() => void keycloak.logout()}>
               退出
             </Button>
           ) : null}
-          {error ? <Typography.Paragraph type="danger">{error}</Typography.Paragraph> : null}
+          {me.error ? <Typography.Paragraph type="danger">无法读取当前员工身份</Typography.Paragraph> : null}
           <Routes>
-            <Route path="/" element={<IdentityPage employee={employee} />} />
-            <Route path="/expense-reports" element={<ReportListPage enabled={keycloak.authenticated === true} />} />
+            <Route path="/" element={<IdentityPage employee={me.data ?? null} />} />
+            <Route path="/expense-reports" element={<ReportListPage enabled={keycloak.authenticated === true} inbox={false} />} />
+            <Route path="/expense-reports/new" element={<NewReportPage />} />
+            <Route path="/expense-reports/:id" element={<ReportDetailPage actorId={me.data?.id} />} />
+            <Route path="/approvals" element={<ReportListPage enabled={keycloak.authenticated === true} inbox />} />
           </Routes>
         </Content>
       </Layout>
@@ -71,35 +72,9 @@ function IdentityPage({ employee }: { employee: EmployeeView | null }) {
       <Descriptions.Item label="姓名">{employee.name}</Descriptions.Item>
       <Descriptions.Item label="账号">{employee.username}</Descriptions.Item>
       <Descriptions.Item label="邮箱">{employee.email}</Descriptions.Item>
+      <Descriptions.Item label="岗位">{employee.role}</Descriptions.Item>
       <Descriptions.Item label="公司抬头">{employee.company.name}</Descriptions.Item>
       <Descriptions.Item label="税号">{employee.company.taxId}</Descriptions.Item>
     </Descriptions>
-  );
-}
-
-function ReportListPage({ enabled }: { enabled: boolean }) {
-  const [list, setList] = useState<ExpenseReportList | null>(null);
-  useEffect(() => {
-    if (!enabled) {
-      return;
-    }
-    void listExpenseReports().then(setList).catch(() => setList(null));
-  }, [enabled]);
-  if (!enabled) {
-    return <Typography.Paragraph>请先登录。</Typography.Paragraph>;
-  }
-  return (
-    <Table
-      rowKey="id"
-      dataSource={list?.items ?? []}
-      locale={{ emptyText: '暂无报销单' }}
-      pagination={false}
-      columns={[
-        { title: '单号', dataIndex: 'id' },
-        { title: '状态', dataIndex: 'status' },
-        { title: '金额（分）', dataIndex: 'amountFen' },
-        { title: '创建时间', dataIndex: 'createdAt' },
-      ]}
-    />
   );
 }
