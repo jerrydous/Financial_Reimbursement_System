@@ -7,3 +7,5 @@ playwright-report
 test-results
 apps/api/prisma/*.db
 *.tsbuildinfo
+core
+core.*
