@@ -5,7 +5,7 @@ import {
   IdentityError,
   type AccessTokenClaims,
 } from '@frs/domain';
-import { employeeViewSchema, type EmployeeView } from '@frs/contracts';
+import { employeeSummarySchema, employeeViewSchema, type EmployeeSummary, type EmployeeView } from '@frs/contracts';
 import { PrismaService } from '../prisma.service';
 
 const employeeInclude = { company: true } as const;
@@ -70,6 +70,21 @@ export class EmployeeService {
       }
     }
     return toView(current);
+  }
+
+  async listDirectory(): Promise<EmployeeSummary[]> {
+    const rows = await this.prisma.employee.findMany({
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+      select: { id: true, username: true, name: true, role: true },
+    });
+    return rows.map((row) =>
+      employeeSummarySchema.parse({
+        id: row.id,
+        username: row.username,
+        name: row.name,
+        role: row.role,
+      }),
+    );
   }
 }
 

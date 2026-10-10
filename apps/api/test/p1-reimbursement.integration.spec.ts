@@ -132,7 +132,7 @@ describe.skipIf(!dockerAvailable())('P1 对私闭环在真实 PostgreSQL 上保�
     expect(replay.id).toBe(paid.id);
     expect(replay.status).toBe('paid');
     expect(await prisma.payment.count({ where: { reportId: draft.id, status: 'succeeded' } })).toBe(1);
-    await expect(reports.adjust(financeId, draft.id, '1000')).rejects.toThrow(/不能从 paid/);
+    await expect(reports.adjust(financeId, draft.id, '1000')).rejects.toThrow(/不能从已支付/);
 
     const audit = await prisma.auditEvent.findFirstOrThrow({ where: { documentId: draft.id } });
     await expect(

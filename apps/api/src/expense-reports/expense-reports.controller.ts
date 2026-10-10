@@ -42,9 +42,10 @@ export class ExpenseReportsController {
     try {
       const employee = await this.employees.getOwn(request.claims);
       const inbox = query.inbox === '1';
-      return expenseReportListSchema.parse(
-        await this.reports.listVisible(employee.id, parsed.data.page, parsed.data.pageSize, inbox),
-      );
+      const listed = inbox
+        ? await this.reports.listVisible(employee.id, parsed.data.page, parsed.data.pageSize, true)
+        : await this.reports.listOwn(employee.id, parsed.data.page, parsed.data.pageSize);
+      return expenseReportListSchema.parse(listed);
     } catch (error) {
       if (error instanceof Error && error.message === 'PAGE_TOO_DEEP') {
         throw new BadRequestException({

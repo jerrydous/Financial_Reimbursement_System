@@ -4,6 +4,7 @@ import { ExpenseReportError, MoneyError } from '@frs/domain';
 
 const statusByCode: Record<string, number> = {
   IDEMPOTENCY_KEY_REQUIRED: HttpStatus.BAD_REQUEST,
+  IDEMPOTENCY_PAYLOAD_MISMATCH: HttpStatus.CONFLICT,
   INVOICE_REQUIRED: HttpStatus.BAD_REQUEST,
   INVOICE_NUMBER_REQUIRED: HttpStatus.BAD_REQUEST,
   AMOUNT_NOT_INTEGER_FEN: HttpStatus.BAD_REQUEST,

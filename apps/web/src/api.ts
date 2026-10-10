@@ -1,9 +1,19 @@
+import type { EmployeeDirectory, EmployeeView, ExpenseReportDetail, ExpenseReportList, InvoiceList, InvoiceView } from '@frs/contracts';
 import { authHeader } from './auth';
-import type { EmployeeView, ExpenseReportDetail, ExpenseReportList, InvoiceList, InvoiceView } from '@frs/contracts';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-export type { EmployeeView, ExpenseReportDetail, ExpenseReportList, InvoiceList, InvoiceView };
+export type { EmployeeDirectory, EmployeeView, ExpenseReportDetail, ExpenseReportList, InvoiceList, InvoiceView };
+
+export class ApiError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+  }
+}
 
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
@@ -16,8 +26,8 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
 
 async function read<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { code?: string } | null;
-    throw new Error(body?.code ?? `HTTP_${response.status}`);
+    const body = (await response.json().catch(() => null)) as { code?: string; message?: string } | null;
+    throw new ApiError(body?.code ?? `HTTP_${response.status}`, body?.message ?? '请求失败，请稍后再试');
   }
   return response.json() as Promise<T>;
 }
@@ -26,16 +36,20 @@ export async function getMe(): Promise<EmployeeView> {
   return read(await request('/me'));
 }
 
-export async function listExpenseReports(inbox: boolean): Promise<ExpenseReportList> {
-  return read(await request(`/expense-reports?inbox=${inbox ? '1' : '0'}`));
+export async function listEmployees(): Promise<EmployeeDirectory> {
+  return read(await request('/employees'));
+}
+
+export async function listExpenseReports(inbox: boolean, page: number, pageSize = 20): Promise<ExpenseReportList> {
+  return read(await request(`/expense-reports?inbox=${inbox ? '1' : '0'}&page=${page}&pageSize=${pageSize}`));
 }
 
 export async function getExpenseReport(id: string): Promise<ExpenseReportDetail> {
   return read(await request(`/expense-reports/${id}`));
 }
 
-export async function listInvoices(): Promise<InvoiceList> {
-  return read(await request('/invoices'));
+export async function listInvoices(page = 1, pageSize = 20): Promise<InvoiceList> {
+  return read(await request(`/invoices?page=${page}&pageSize=${pageSize}`));
 }
 
 export async function uploadInvoice(file: File): Promise<InvoiceView> {

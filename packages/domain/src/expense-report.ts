@@ -73,13 +73,38 @@ export const expenseReportTransitions: readonly Transition[] = [
 
 const terminalStatuses = new Set<ExpenseReportStatus>(['paid', 'rejected', 'withdrawn']);
 
+const statusName: Record<ExpenseReportStatus, string> = {
+  draft: '草稿',
+  submitted: '已提交',
+  approving: '主管审批',
+  finance_review: '财务审核',
+  paying: '待支付',
+  paid: '已支付',
+  rejected: '已驳回',
+  withdrawn: '已撤回',
+};
+
+const actionName: Record<ExpenseReportAction, string> = {
+  submit: '提交',
+  start_approval: '开始审批',
+  approve: '主管同意',
+  reject: '驳回',
+  withdraw: '撤回',
+  transfer: '转交',
+  finance_adjust: '修改批准金额',
+  finance_approve: '财务通过',
+  pay_success: '确认支付',
+  pay_fail: '支付失败',
+  revise: '改回草稿',
+};
+
 export function transitionExpenseReport(
   from: ExpenseReportStatus,
   action: ExpenseReportAction,
 ): ExpenseReportStatus {
   const found = expenseReportTransitions.find((item) => item.from === from && item.action === action);
   if (!found) {
-    throw new ExpenseReportError('INVALID_TRANSITION', `不能从 ${from} 执行 ${action}`);
+    throw new ExpenseReportError('INVALID_TRANSITION', `不能从${statusName[from]}执行${actionName[action]}`);
   }
   return found.to;
 }

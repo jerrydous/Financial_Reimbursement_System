@@ -37,7 +37,7 @@ export class InvoiceCommands {
       orderBy: { createdAt: 'asc' },
     });
     if (existing) {
-      return toInvoiceView(existing);
+      return { ...toInvoiceView(existing), reused: true };
     }
     const id = uuidv7();
     const objectKey = `invoices/default/${id}`;
@@ -67,7 +67,7 @@ export class InvoiceCommands {
       if (!winner || winner.ownerEmployeeId !== ownerEmployeeId) {
         throw new ExpenseReportError('INVOICE_ALREADY_BOUND', '这张发票影像已经在另一张有效报销单里');
       }
-      return toInvoiceView(winner);
+      return { ...toInvoiceView(winner), reused: true };
     }
   }
 

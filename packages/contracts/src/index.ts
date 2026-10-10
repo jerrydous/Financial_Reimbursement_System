@@ -37,6 +37,17 @@ export const employeeViewSchema = z.object({
   company: companyViewSchema,
 });
 
+export const employeeSummarySchema = z.object({
+  id: z.string().uuid(),
+  username: z.string().min(1),
+  name: z.string().min(1),
+  role: employeeRoleSchema,
+});
+
+export const employeeDirectorySchema = z.object({
+  items: z.array(employeeSummarySchema),
+});
+
 export const expenseReportStatusSchema = z.enum([
   'draft',
   'submitted',
@@ -84,11 +95,13 @@ export const invoiceViewSchema = z.object({
   recognitionStatus: z.enum(['pending_confirmation', 'confirmed']),
   verificationStatus: z.literal('unverified'),
   binding: z.enum(['active', 'released']),
+  reused: z.boolean().optional(),
 });
 
 export const auditViewSchema = z.object({
   action: z.string().min(1),
   actorId: z.string().min(1),
+  actorName: z.string().min(1),
   fromStatus: z.string().min(1),
   toStatus: z.string().min(1),
   createdAt: z.string().datetime(),
@@ -148,6 +161,8 @@ export { buildOpenApiDocument } from './openapi';
 
 export type PageQuery = z.infer<typeof pageQuerySchema>;
 export type EmployeeView = z.infer<typeof employeeViewSchema>;
+export type EmployeeSummary = z.infer<typeof employeeSummarySchema>;
+export type EmployeeDirectory = z.infer<typeof employeeDirectorySchema>;
 export type ExpenseReportList = z.infer<typeof expenseReportListSchema>;
 export type ExpenseReportDetail = z.infer<typeof expenseReportDetailSchema>;
 export type InvoiceView = z.infer<typeof invoiceViewSchema>;

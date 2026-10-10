@@ -5,7 +5,6 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
-import { initAuth } from './auth';
 
 const queryClient = new QueryClient();
 
@@ -14,21 +13,14 @@ if (!root) {
   throw new Error('ROOT_MISSING');
 }
 
-void Promise.race([
-  initAuth().catch(() => false),
-  new Promise((resolve) => {
-    setTimeout(resolve, 3000);
-  }),
-]).then(() => {
-  createRoot(root).render(
-    <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <ConfigProvider locale={zhCN}>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </ConfigProvider>
-      </QueryClientProvider>
-    </StrictMode>,
-  );
-});
+createRoot(root).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <ConfigProvider locale={zhCN} button={{ autoInsertSpace: false }}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </ConfigProvider>
+    </QueryClientProvider>
+  </StrictMode>,
+);

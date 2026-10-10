@@ -22,6 +22,9 @@ export async function loadReport(tx: ReportTx, reportId: string): Promise<Expens
   if (!report) {
     throw new ExpenseReportError('REPORT_NOT_FOUND', '报销单不存在');
   }
+  const actorIds = [...new Set(report.auditEvents.map((event) => event.actorId))].filter((actorId) => actorId !== 'system');
+  const actors = actorIds.length === 0 ? [] : await tx.employee.findMany({ where: { id: { in: actorIds } } });
+  const actorNames = new Map(actors.map((actor) => [actor.id, actor.name]));
   return expenseReportDetailSchema.parse({
     id: report.id,
     employeeId: report.employeeId,
@@ -49,6 +52,7 @@ export async function loadReport(tx: ReportTx, reportId: string): Promise<Expens
     audits: report.auditEvents.map((event) => ({
       action: event.action,
       actorId: event.actorId,
+      actorName: event.actorId === 'system' ? '系统' : (actorNames.get(event.actorId) ?? '未知员工'),
       fromStatus: event.fromStatus,
       toStatus: event.toStatus,
       createdAt: event.createdAt.toISOString(),

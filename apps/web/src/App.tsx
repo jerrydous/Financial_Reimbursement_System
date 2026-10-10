@@ -1,17 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
-import { Button, Descriptions, Layout, Menu, Typography } from 'antd';
+import { Button, Descriptions, Layout, Menu, Space, Spin, Typography } from 'antd';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { getMe, type EmployeeView } from './api';
-import { keycloak } from './auth';
+import { keycloak, useSession } from './auth';
+import { labelOf, roleLabel } from './labels';
 import { NewReportPage, ReportDetailPage, ReportListPage } from './report-pages';
 
 const { Header, Content, Sider } = Layout;
 
 export function App() {
   const location = useLocation();
+  const session = useSession();
   const me = useQuery({
     queryKey: ['me'],
-    enabled: keycloak.authenticated === true,
+    enabled: session.authenticated,
     queryFn: getMe,
   });
   const selected = location.pathname.startsWith('/expense-reports')
@@ -22,7 +24,25 @@ export function App() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Header style={{ color: '#fff', fontSize: 18 }}>财务报销</Header>
+      <Header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingInline: 24 }}>
+        <Typography.Text style={{ color: '#fff', fontSize: 18 }}>财务报销</Typography.Text>
+        <Space>
+          {session.phase === 'ready' && session.authenticated && me.data ? (
+            <Typography.Text style={{ color: '#fff' }}>
+              {me.data.name} · {labelOf(roleLabel, me.data.role)}
+            </Typography.Text>
+          ) : null}
+          {session.phase === 'loading' ? <Typography.Text style={{ color: '#fff' }}>正在连接登录…</Typography.Text> : null}
+          {session.phase === 'ready' && session.authenticated ? (
+            <Button onClick={() => void keycloak.logout()}>退出</Button>
+          ) : null}
+          {session.phase === 'ready' && !session.authenticated ? (
+            <Button type="primary" onClick={() => void keycloak.login()}>
+              登录
+            </Button>
+          ) : null}
+        </Space>
+      </Header>
       <Layout>
         <Sider width={200} theme="light">
           <Menu
@@ -35,44 +55,45 @@ export function App() {
             ]}
           />
         </Sider>
-        <Content style={{ padding: 24 }}>
-          {keycloak.authenticated ? null : (
-            <Button type="primary" onClick={() => void keycloak.login()}>
-              登录
-            </Button>
+        <Content style={{ padding: 24, background: '#f5f5f5' }}>
+          {session.phase === 'loading' ? (
+            <Space>
+              <Spin />
+              <Typography.Text>正在连接登录服务…</Typography.Text>
+            </Space>
+          ) : (
+            <>
+              {session.authenticated && me.error ? (
+                <Typography.Paragraph type="danger">无法读取当前员工身份</Typography.Paragraph>
+              ) : null}
+              <Routes>
+                <Route path="/" element={<IdentityPage authenticated={session.authenticated} employee={me.data ?? null} />} />
+                <Route path="/expense-reports" element={<ReportListPage enabled={session.authenticated} inbox={false} />} />
+                <Route path="/expense-reports/new" element={<NewReportPage />} />
+                <Route path="/expense-reports/:id" element={<ReportDetailPage actorId={me.data?.id} />} />
+                <Route path="/approvals" element={<ReportListPage enabled={session.authenticated} inbox />} />
+              </Routes>
+            </>
           )}
-          {keycloak.authenticated ? (
-            <Button style={{ marginBottom: 16 }} onClick={() => void keycloak.logout()}>
-              退出
-            </Button>
-          ) : null}
-          {me.error ? <Typography.Paragraph type="danger">无法读取当前员工身份</Typography.Paragraph> : null}
-          <Routes>
-            <Route path="/" element={<IdentityPage employee={me.data ?? null} />} />
-            <Route path="/expense-reports" element={<ReportListPage enabled={keycloak.authenticated === true} inbox={false} />} />
-            <Route path="/expense-reports/new" element={<NewReportPage />} />
-            <Route path="/expense-reports/:id" element={<ReportDetailPage actorId={me.data?.id} />} />
-            <Route path="/approvals" element={<ReportListPage enabled={keycloak.authenticated === true} inbox />} />
-          </Routes>
         </Content>
       </Layout>
     </Layout>
   );
 }
 
-function IdentityPage({ employee }: { employee: EmployeeView | null }) {
-  if (!keycloak.authenticated) {
-    return <Typography.Paragraph>登录后只能看到自己的员工身份和公司抬头。</Typography.Paragraph>;
+function IdentityPage({ authenticated, employee }: { authenticated: boolean; employee: EmployeeView | null }) {
+  if (!authenticated) {
+    return <Typography.Paragraph>请使用右上角的登录。登录后只能看到自己的员工身份和公司抬头。</Typography.Paragraph>;
   }
   if (!employee) {
     return <Typography.Paragraph>正在读取身份…</Typography.Paragraph>;
   }
   return (
-    <Descriptions title="当前员工" bordered column={1}>
+    <Descriptions title="当前员工" bordered column={1} style={{ background: '#fff' }}>
       <Descriptions.Item label="姓名">{employee.name}</Descriptions.Item>
       <Descriptions.Item label="账号">{employee.username}</Descriptions.Item>
       <Descriptions.Item label="邮箱">{employee.email}</Descriptions.Item>
-      <Descriptions.Item label="岗位">{employee.role}</Descriptions.Item>
+      <Descriptions.Item label="岗位">{labelOf(roleLabel, employee.role)}</Descriptions.Item>
       <Descriptions.Item label="公司抬头">{employee.company.name}</Descriptions.Item>
       <Descriptions.Item label="税号">{employee.company.taxId}</Descriptions.Item>
     </Descriptions>
