@@ -1,0 +1,29 @@
+{
+  "name": "financial-reimbursement-system",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint .",
+    "test": "pnpm -r --if-present test",
+    "test:integration": "pnpm --filter @frs/api test:integration",
+    "test:e2e": "pnpm --filter @frs/web test:e2e",
+    "audit": "sh scripts/audit-prod.sh"
+  },
+  "pnpm": {
+    "overrides": {
+      "basic-ftp": "6.2.1",
+      "csv-parse": "7.0.2",
+      "deepmerge-ts": "8.0.0"
+    }
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "eslint": "^9.28.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.33.1"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "realm": "expense",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "clients": [
+    {
+      "clientId": "web",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:5173/*"],
+      "webOrigins": ["http://localhost:5173"],
+      "fullScopeAllowed": true,
+      "defaultClientScopes": ["basic", "web-origins", "acr", "profile", "roles", "email"]
+    }
+  ],
+  "users": [
+    {
+      "username": "employee1",
+      "email": "employee1@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "示例",
+      "lastName": "员工",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "employee1",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "manager1",
+      "email": "manager1@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "示例",
+      "lastName": "主管",
+      "credentials": [{ "type": "password", "value": "manager1", "temporary": false }]
+    },
+    {
+      "username": "finance1",
+      "email": "finance1@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "示例",
+      "lastName": "财务",
+      "credentials": [{ "type": "password", "value": "finance1", "temporary": false }]
+    },
+    {
+      "username": "cashier1",
+      "email": "cashier1@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "示例",
+      "lastName": "出纳",
+      "credentials": [{ "type": "password", "value": "cashier1", "temporary": false }]
+    }
+  ]
+}
