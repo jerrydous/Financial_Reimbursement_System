@@ -15,7 +15,7 @@
       "redirectUris": ["http://localhost:5173/*"],
       "webOrigins": ["http://localhost:5173"],
       "fullScopeAllowed": true,
-      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"]
+      "defaultClientScopes": ["basic", "web-origins", "acr", "profile", "roles", "email"]
     }
   ],
   "users": [
