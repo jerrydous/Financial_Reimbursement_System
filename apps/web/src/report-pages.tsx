@@ -31,33 +31,40 @@ const confirmForm = z.object({
   currency: currencyCodeSchema,
 });
 
-export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: boolean }) {
+export function ReportListPage({ enabled, scope }: { enabled: boolean; scope: 'own' | 'inbox' | 'reviewed' }) {
   const [page, setPage] = useState(1);
   const pageSize = 20;
   const list = useQuery({
-    queryKey: ['expense-reports', inbox, page, pageSize],
+    queryKey: ['expense-reports', scope, page, pageSize],
     enabled,
-    queryFn: () => listExpenseReports(inbox, page, pageSize),
+    queryFn: () => listExpenseReports(scope, page, pageSize),
   });
   if (!enabled) {
     return <Typography.Paragraph>请先登录。</Typography.Paragraph>;
   }
+  const title = scope === 'inbox' ? '待我处理' : scope === 'reviewed' ? '审批记录' : '我的报销';
+  const empty = scope === 'inbox' ? '没有待处理的单据' : scope === 'reviewed' ? '还没有审过的单据' : '暂无报销单';
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%' }}>
       <Typography.Title level={4} style={{ margin: 0 }}>
-        {inbox ? '待我处理' : '我的报销'}
+        {title}
       </Typography.Title>
-      {inbox ? null : (
+      {scope === 'reviewed' ? (
+        <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
+          同意、驳回、转交、改金额和支付过的单据留在这里，影像和金额记录仍可打开核对。
+        </Typography.Paragraph>
+      ) : null}
+      {scope === 'own' ? (
         <Link to="/expense-reports/new">
           <Button type="primary">新建报销单</Button>
         </Link>
-      )}
+      ) : null}
       {list.error instanceof Error ? <Alert type="error" message={list.error.message} /> : null}
       <Table
         rowKey="id"
         loading={list.isLoading}
         dataSource={list.data?.items ?? []}
-        locale={{ emptyText: inbox ? '没有待处理的单据' : '暂无报销单' }}
+        locale={{ emptyText: empty }}
         pagination={{
           current: list.data?.page ?? page,
           pageSize: list.data?.pageSize ?? pageSize,
@@ -407,12 +414,27 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
           { title: '操作者', dataIndex: 'actorName' },
           { title: '从', dataIndex: 'fromStatus', render: (status: string) => labelOf(statusLabel, status) },
           { title: '到', dataIndex: 'toStatus', render: (status: string) => labelOf(statusLabel, status) },
+          {
+            title: '金额',
+            render: (_, row) => auditAmount(row, current.currency),
+          },
           { title: '时间', dataIndex: 'createdAt', render: (createdAt: string) => formatTime(createdAt) },
         ]}
       />
       {act.error instanceof Error ? <Alert type="error" message={act.error.message} /> : null}
     </Space>
   );
+}
+
+function auditAmount(
+  row: { beforeAmountFen: string | null; afterAmountFen: string | null },
+  currency: string,
+): string {
+  if (row.beforeAmountFen && row.afterAmountFen && row.beforeAmountFen !== row.afterAmountFen) {
+    return `${formatMoney(row.beforeAmountFen, currency)} → ${formatMoney(row.afterAmountFen, currency)}`;
+  }
+  const amount = row.afterAmountFen ?? row.beforeAmountFen;
+  return amount ? formatMoney(amount, currency) : '—';
 }
 
 function InvoiceTable({ report }: { report: ExpenseReportDetail }) {

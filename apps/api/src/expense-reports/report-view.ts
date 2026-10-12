@@ -56,6 +56,8 @@ export async function loadReport(tx: ReportTx, reportId: string): Promise<Expens
       actorName: event.actorId === 'system' ? '系统' : (actorNames.get(event.actorId) ?? '未知员工'),
       fromStatus: event.fromStatus,
       toStatus: event.toStatus,
+      beforeAmountFen: event.beforeAmountFen?.toString() ?? null,
+      afterAmountFen: event.afterAmountFen?.toString() ?? null,
       createdAt: event.createdAt.toISOString(),
     })),
   });

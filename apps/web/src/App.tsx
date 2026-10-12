@@ -19,11 +19,13 @@ export function App() {
     queryFn: getMe,
   });
   const [loginOpen, setLoginOpen] = useState(false);
-  const selected = location.pathname.startsWith('/expense-reports')
-    ? '/expense-reports'
+  const selected = location.pathname.startsWith('/approvals/history')
+    ? '/approvals/history'
     : location.pathname.startsWith('/approvals')
       ? '/approvals'
-      : '/';
+      : location.pathname.startsWith('/expense-reports')
+        ? '/expense-reports'
+        : '/';
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -68,6 +70,7 @@ export function App() {
               { key: '/', label: <Link to="/">我的身份</Link> },
               { key: '/expense-reports', label: <Link to="/expense-reports">我的报销</Link> },
               { key: '/approvals', label: <Link to="/approvals">待我处理</Link> },
+              { key: '/approvals/history', label: <Link to="/approvals/history">审批记录</Link> },
             ]}
           />
         </Sider>
@@ -93,10 +96,11 @@ export function App() {
                     />
                   }
                 />
-                <Route path="/expense-reports" element={<ReportListPage enabled={session.authenticated} inbox={false} />} />
+                <Route path="/expense-reports" element={<ReportListPage enabled={session.authenticated} scope="own" />} />
                 <Route path="/expense-reports/new" element={<NewReportPage />} />
                 <Route path="/expense-reports/:id" element={<ReportDetailPage actorId={me.data?.id} />} />
-                <Route path="/approvals" element={<ReportListPage enabled={session.authenticated} inbox />} />
+                <Route path="/approvals/history" element={<ReportListPage enabled={session.authenticated} scope="reviewed" />} />
+                <Route path="/approvals" element={<ReportListPage enabled={session.authenticated} scope="inbox" />} />
               </Routes>
             </>
           )}

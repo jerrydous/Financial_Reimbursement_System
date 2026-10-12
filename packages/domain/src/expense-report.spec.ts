@@ -5,6 +5,7 @@ import {
   assertActor,
   assertPaidAmountStable,
   assertReportMatchesLines,
+  canReadDocument,
   expenseReportTransitions,
   nextActorAfter,
   normalizeIdempotencyKey,
@@ -69,5 +70,40 @@ describe('报销单状态机', () => {
     expect(normalizeIdempotencyKey(' same ')).toBe('same');
     expect(() => normalizeIdempotencyKey(undefined)).toThrow(/Idempotency-Key/);
     expect(() => normalizeIdempotencyKey('  ')).toThrow(/Idempotency-Key/);
+  });
+});
+
+describe('审批记录仍可核对', () => {
+  it('当前审核人可以查看单据和发票影像', () => {
+    expect(
+      canReadDocument({
+        actorId: 'finance',
+        ownerId: 'employee',
+        grants: [{ actorId: 'finance', action: 'decide', revokedAt: null }],
+        actedReview: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('审批权收回后，凭审批记录仍可查看', () => {
+    expect(
+      canReadDocument({
+        actorId: 'manager',
+        ownerId: 'employee',
+        grants: [{ actorId: 'manager', action: 'decide', revokedAt: '2026-10-12T00:00:00.000Z' }],
+        actedReview: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('没有参与这张单的员工不能查看', () => {
+    expect(
+      canReadDocument({
+        actorId: 'stranger',
+        ownerId: 'employee',
+        grants: [{ actorId: 'manager', action: 'read', revokedAt: null }],
+        actedReview: false,
+      }),
+    ).toBe(false);
   });
 });

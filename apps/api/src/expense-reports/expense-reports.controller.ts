@@ -41,10 +41,11 @@ export class ExpenseReportsController {
     }
     try {
       const employee = await this.employees.getOwn(request.claims);
-      const inbox = query.inbox === '1';
-      const listed = inbox
-        ? await this.reports.listVisible(employee.id, parsed.data.page, parsed.data.pageSize, true)
-        : await this.reports.listOwn(employee.id, parsed.data.page, parsed.data.pageSize);
+      const listed = query.reviewed === '1'
+        ? await this.reports.listReviewed(employee.id, parsed.data.page, parsed.data.pageSize)
+        : query.inbox === '1'
+          ? await this.reports.listVisible(employee.id, parsed.data.page, parsed.data.pageSize, true)
+          : await this.reports.listOwn(employee.id, parsed.data.page, parsed.data.pageSize);
       return expenseReportListSchema.parse(listed);
     } catch (error) {
       if (error instanceof Error && error.message === 'PAGE_TOO_DEEP') {

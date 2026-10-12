@@ -120,4 +120,26 @@ describe('报销列表只查当前员工', () => {
     expect(typeof list.items[0]?.amountFen).toBe('string');
     expect(list.items[0]?.currency).toBe('CNY');
   });
+
+  it('审批记录按审核人的审批动作查询，办结后仍能列出', async () => {
+    const count = vi.fn().mockResolvedValue(0);
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      expenseReport: { count, findMany },
+      $transaction: (operations: Promise<unknown>[]) => Promise.all(operations),
+    } as unknown as PrismaService;
+    const actorId = '33333333-3333-4333-8333-333333333333';
+    const list = await new ExpenseReportsService(prisma).listReviewed(actorId, 1, 20);
+    expect(list.total).toBe(0);
+    expect(count).toHaveBeenCalledWith({
+      where: {
+        auditEvents: {
+          some: {
+            actorId,
+            action: { in: ['approve', 'reject', 'transfer', 'finance_adjust', 'finance_approve', 'pay_success', 'pay_fail'] },
+          },
+        },
+      },
+    });
+  });
 });

@@ -5,7 +5,9 @@ import { currencyCodeSchema, pageOffset, type InvoiceList, type InvoiceView } fr
 import {
   ExpenseReportError,
   assertVerificationUnverified,
+  canReadDocument,
   confirmRecognition,
+  isReviewRecordAction,
   parseFen,
   type RecognitionStatus,
 } from '@frs/domain';
@@ -165,20 +167,38 @@ export class InvoiceCommands {
     if (!invoice) {
       throw new ExpenseReportError('INVOICE_NOT_FOUND', '发票不存在');
     }
-    if (invoice.ownerEmployeeId !== actorId) {
-      const readable = invoice.expenseReportId
-        ? await this.prisma.documentAccess.findFirst({
-            where: {
-              actorId,
-              documentId: invoice.expenseReportId,
-              action: 'read',
-              revokedAt: null,
-            },
-          })
-        : null;
-      if (!readable) {
-        throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查看别人的发票影像');
-      }
+    if (invoice.ownerEmployeeId === actorId) {
+      return invoice;
+    }
+    const lines = await this.prisma.expenseLine.findMany({
+      where: { invoiceId },
+      select: { reportId: true },
+    });
+    const reportIds = [...new Set([invoice.expenseReportId, ...lines.map((line) => line.reportId)].filter((id) => id !== null))];
+    const reports = reportIds.length === 0
+      ? []
+      : await this.prisma.expenseReport.findMany({
+          where: { id: { in: reportIds } },
+          select: {
+            employeeId: true,
+            accesses: { where: { actorId }, select: { actorId: true, action: true, revokedAt: true } },
+            auditEvents: { where: { actorId }, select: { action: true } },
+          },
+        });
+    const allowed = reports.some((report) =>
+      canReadDocument({
+        actorId,
+        ownerId: report.employeeId,
+        grants: report.accesses.map((grant) => ({
+          actorId: grant.actorId,
+          action: grant.action,
+          revokedAt: grant.revokedAt?.toISOString() ?? null,
+        })),
+        actedReview: report.auditEvents.some((event) => isReviewRecordAction(event.action)),
+      }),
+    );
+    if (!allowed) {
+      throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查看别人的发票影像');
     }
     return invoice;
   }

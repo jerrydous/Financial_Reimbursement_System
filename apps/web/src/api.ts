@@ -40,8 +40,13 @@ export async function listEmployees(): Promise<EmployeeDirectory> {
   return read(await request('/employees'));
 }
 
-export async function listExpenseReports(inbox: boolean, page: number, pageSize = 20): Promise<ExpenseReportList> {
-  return read(await request(`/expense-reports?inbox=${inbox ? '1' : '0'}&page=${page}&pageSize=${pageSize}`));
+export async function listExpenseReports(
+  scope: 'own' | 'inbox' | 'reviewed',
+  page: number,
+  pageSize = 20,
+): Promise<ExpenseReportList> {
+  const filter = scope === 'inbox' ? 'inbox=1' : scope === 'reviewed' ? 'reviewed=1' : 'inbox=0';
+  return read(await request(`/expense-reports?${filter}&page=${page}&pageSize=${pageSize}`));
 }
 
 export async function getExpenseReport(id: string): Promise<ExpenseReportDetail> {

@@ -14,6 +14,8 @@ import {
   assertSingleRoleAssignee,
   assertVerificationUnverified,
   buildAuditDraft,
+  canReadDocument,
+  isReviewRecordAction,
   decideObjectKey,
   expenseWorkflowId,
   nextActorAfter,
@@ -192,25 +194,27 @@ export class ExpenseReportCommands {
   }
 
   async getVisible(actorId: string, reportId: string): Promise<ExpenseReportDetail> {
-    const owned = await this.prisma.expenseReport.findUnique({
+    const visible = await this.prisma.expenseReport.findUnique({
       where: { id: reportId },
-      select: { employeeId: true },
+      select: {
+        employeeId: true,
+        accesses: { where: { actorId }, select: { actorId: true, action: true, revokedAt: true } },
+        auditEvents: { where: { actorId }, select: { action: true } },
+      },
     });
-    if (!owned) {
+    if (!visible) {
       throw new ExpenseReportError('REPORT_NOT_FOUND', '报销单不存在');
     }
-    if (owned.employeeId === actorId) {
-      return this.prisma.$transaction((tx) => loadReport(tx, reportId));
-    }
-    const policies = await this.prisma.documentAccess.findMany({
-      where: { documentId: reportId, revokedAt: null, action: 'read' },
-    });
-    const allowed = await enforceDocumentPolicy(
+    const allowed = canReadDocument({
       actorId,
-      reportId,
-      'read',
-      policies.map((policy) => ({ actorId: policy.actorId, objectKey: policy.objectKey, action: policy.action })),
-    );
+      ownerId: visible.employeeId,
+      grants: visible.accesses.map((grant) => ({
+        actorId: grant.actorId,
+        action: grant.action,
+        revokedAt: grant.revokedAt?.toISOString() ?? null,
+      })),
+      actedReview: visible.auditEvents.some((event) => isReviewRecordAction(event.action)),
+    });
     if (!allowed) {
       throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查看这张报销单');
     }
@@ -502,6 +506,7 @@ export class ExpenseReportCommands {
       });
     }
     if (input.action === 'start_approval' && report.employee.managerId) {
+      await this.grant(tx, report.employee.managerId, report.id, 'read', report.id);
       await this.grant(tx, report.employee.managerId, report.id, 'decide', decideObjectKey(report.id, 'manager'));
     }
     if (input.action === 'approve' && finance[0]) {
@@ -568,6 +573,7 @@ export class ExpenseReportCommands {
   }
 
   private async revokeDecide(tx: Prisma.TransactionClient, documentId: string): Promise<void> {
+    // 只收回当前审批权。阅读授权和审计记录留下，方便以后核对影像和金额。
     await tx.documentAccess.updateMany({
       where: { documentId, action: 'decide', revokedAt: null },
       data: { revokedAt: new Date() },

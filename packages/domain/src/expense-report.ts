@@ -245,3 +245,42 @@ export function buildAuditDraft(input: AuditDraft): AuditDraft {
 export function decideObjectKey(reportId: string, step: ExpenseReportStep): string {
   return `${reportId}:${step}`;
 }
+
+/** 这些动作写进审计后，单据和影像要留着给操作者以后核对。 */
+export const reviewRecordActions = [
+  'approve',
+  'reject',
+  'transfer',
+  'finance_adjust',
+  'finance_approve',
+  'pay_success',
+  'pay_fail',
+] as const satisfies readonly ExpenseReportAction[];
+
+export type DocumentGrant = {
+  actorId: string;
+  action: string;
+  revokedAt: string | null;
+};
+
+export function isReviewRecordAction(action: string): boolean {
+  return (reviewRecordActions as readonly string[]).includes(action);
+}
+
+export function canReadDocument(input: {
+  actorId: string;
+  ownerId: string;
+  grants: readonly DocumentGrant[];
+  actedReview: boolean;
+}): boolean {
+  if (input.actorId === input.ownerId) {
+    return true;
+  }
+  const currentGrant = input.grants.some(
+    (grant) =>
+      grant.actorId === input.actorId &&
+      grant.revokedAt === null &&
+      (grant.action === 'read' || grant.action === 'decide'),
+  );
+  return currentGrant || input.actedReview;
+}

@@ -109,6 +109,8 @@ export const auditViewSchema = z.object({
   actorName: z.string().min(1),
   fromStatus: z.string().min(1),
   toStatus: z.string().min(1),
+  beforeAmountFen: fenStringSchema.nullable(),
+  afterAmountFen: fenStringSchema.nullable(),
   createdAt: z.string().datetime(),
 });
 
