@@ -87,7 +87,7 @@ export function InvoicePreview({
   onClose: () => void;
 }) {
   return (
-    <Modal title="发票影像" open={open} footer={null} onCancel={onClose} width={840}>
+    <Modal title="发票影像" open={open} footer={null} onCancel={onClose} width={840} transitionName="" maskTransitionName="">
       {loading ? <Typography.Text>正在打开影像…</Typography.Text> : null}
       {error ? <Typography.Text type="danger">{error}</Typography.Text> : null}
       {imageUrl ? <img src={imageUrl} alt="发票影像" style={{ display: 'block', maxWidth: '100%', margin: '0 auto', background: '#fff' }} /> : null}

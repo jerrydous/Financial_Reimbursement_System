@@ -215,6 +215,15 @@ body {
   margin-top: 16px;
 }
 
+/* antd 5 的进出动画在 React 19 上会停在起始帧，提示一直是透明的 */
+.ant-message-move-up-appear,
+.ant-message-move-up-enter {
+  animation: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+  padding: 8px !important;
+}
+
 @media (max-width: 960px) {
   .stat-grid,
   .home-grid {

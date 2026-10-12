@@ -28,6 +28,8 @@ export function LoginDialog({ open, onClose }: { open: boolean; onClose: () => v
       footer={null}
       width={400}
       destroyOnHidden
+      transitionName=""
+      maskTransitionName=""
       onCancel={() => {
         if (!submitting) {
           setError('');

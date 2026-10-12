@@ -484,6 +484,8 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
       <Modal
         title="转交"
         open={transferOpen}
+        transitionName=""
+        maskTransitionName=""
         confirmLoading={act.isPending}
         onCancel={() => setTransferOpen(false)}
         onOk={() => {
@@ -509,6 +511,8 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
       <Modal
         title="调整批准金额"
         open={adjustOpen}
+        transitionName=""
+        maskTransitionName=""
         confirmLoading={act.isPending}
         onCancel={() => {
           setAdjustOpen(false);

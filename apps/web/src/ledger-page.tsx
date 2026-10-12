@@ -201,6 +201,8 @@ export function LedgerPage({ enabled }: { enabled: boolean }) {
       <Modal
         title="转交发票"
         open={transferOpen}
+        transitionName=""
+        maskTransitionName=""
         confirmLoading={transfer.isPending}
         onCancel={() => setTransferOpen(false)}
         onOk={() => void transfer.mutateAsync()}

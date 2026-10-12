@@ -130,6 +130,7 @@ export async function loginWithPassword(username: string, password: string): Pro
         password,
         scope: 'openid',
       }),
+      signal: AbortSignal.timeout(15_000),
     });
   } catch {
     throw new Error('登录服务没有响应');
@@ -153,6 +154,7 @@ export async function logout(): Promise<void> {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: clientId, refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(15_000),
     }).catch(() => undefined);
   }
   clearStored();
