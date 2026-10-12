@@ -50,6 +50,16 @@ export {
   type RecognitionStatus,
 } from './invoice';
 export {
+  allocateByWeight,
+  groupFen,
+  summarizeSettled,
+  unsetSliceKey,
+  type CurrencySettlement,
+  type FenSlice,
+  type SettledReportInput,
+  type WeightedLine,
+} from './settlement';
+export {
   assertCanBindSubject,
   assertSameSubject,
   IdentityError,

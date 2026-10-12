@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Descriptions, Form, Input, Modal, Select, Space, Table, Typography } from 'antd';
 import { yuanTextToFen } from '@frs/domain';
-import { currencyCodeSchema } from '@frs/contracts';
+import { currencyCodeSchema, expenseCategorySchema } from '@frs/contracts';
 import { useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -20,7 +20,7 @@ import {
   uploadInvoice,
   type ExpenseReportDetail,
 } from './api';
-import { actionLabel, currencyOptions, formatMoney, formatTime, labelOf, reportNo, roleLabel, statusLabel, statusStillMoving } from './labels';
+import { actionLabel, categoryLabel, categoryOptions, currencyOptions, formatMoney, formatTime, labelOf, reportNo, roleLabel, statusLabel, statusStillMoving } from './labels';
 
 const yuanPattern = /^\d+\.\d{2}$/;
 
@@ -29,6 +29,8 @@ const confirmForm = z.object({
   invoiceNumber: z.string().min(1, '请填写发票号码'),
   yuan: z.string().regex(yuanPattern, '金额写成两位小数，例如 12.30'),
   currency: currencyCodeSchema,
+  category: z.string().refine((value) => expenseCategorySchema.safeParse(value).success, '请选择费用类别'),
+  merchant: z.string().trim().min(1, '请填写商家或应用').max(40, '商家或应用最多 40 个字'),
 });
 
 export function ReportListPage({ enabled, scope }: { enabled: boolean; scope: 'own' | 'inbox' | 'reviewed' }) {
@@ -110,7 +112,7 @@ export function NewReportPage() {
   const idempotencyKey = useMemo(() => crypto.randomUUID(), [selectionKey]);
   const form = useForm<z.infer<typeof confirmForm>>({
     resolver: zodResolver(confirmForm),
-    defaultValues: { invoiceCode: '', invoiceNumber: '', yuan: '', currency: 'CNY' },
+    defaultValues: { invoiceCode: '', invoiceNumber: '', yuan: '', currency: 'CNY', category: '', merchant: '' },
   });
   const upload = useMutation({
     mutationFn: async (values: z.infer<typeof confirmForm>) => {
@@ -124,6 +126,8 @@ export function NewReportPage() {
         invoiceNumber: values.invoiceNumber,
         amountFen,
         currency: values.currency,
+        category: values.category,
+        merchant: values.merchant.trim(),
       });
       await client.invalidateQueries({ queryKey: ['invoices'] });
       return stored;
@@ -149,7 +153,7 @@ export function NewReportPage() {
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Typography.Title level={4}>新建报销单</Typography.Title>
       <Typography.Paragraph type="secondary">
-        请对照影像自己填写发票代码、发票号码、币种和价税合计。系统不会自动填写识别结果，验真状态保持为未验真。同一张报销单里的发票必须是同一种币种。
+        请对照影像自己填写发票代码、发票号码、费用类别、商家或应用、币种和价税合计。类别按吃穿住行选择。系统不会自动填写识别结果，验真状态保持为未验真。同一张报销单里的发票必须是同一种币种。
       </Typography.Paragraph>
       <Space direction="vertical" size={4}>
         <Typography.Text>发票影像</Typography.Text>
@@ -178,6 +182,8 @@ export function NewReportPage() {
           form.setValue('yuan', String(data.get('yuan') ?? ''));
           const currency = currencyCodeSchema.safeParse(String(data.get('currency') ?? 'CNY'));
           form.setValue('currency', currency.success ? currency.data : 'CNY');
+          form.setValue('category', String(data.get('category') ?? ''));
+          form.setValue('merchant', String(data.get('merchant') ?? ''));
           void form.handleSubmit(
             (values) => {
               if (!file) {
@@ -208,6 +214,37 @@ export function NewReportPage() {
         >
           <div>
             <Input id="invoiceNumber" {...form.register('invoiceNumber')} />
+          </div>
+        </Form.Item>
+        <Form.Item
+          layout="vertical"
+          label="费用类别"
+          htmlFor="category"
+          validateStatus={errors.category ? 'error' : ''}
+          help={errors.category?.message}
+        >
+          <div>
+            <input type="hidden" name="category" value={form.watch('category')} />
+            <Select
+              id="category"
+              style={{ width: 220 }}
+              placeholder="请选择吃穿住行"
+              value={form.watch('category') || undefined}
+              options={categoryOptions.map((option) => ({ value: option.value, label: option.label }))}
+              onChange={(value) => form.setValue('category', value, { shouldValidate: true })}
+            />
+          </div>
+        </Form.Item>
+        <Form.Item
+          layout="vertical"
+          label="商家或应用"
+          htmlFor="merchant"
+          extra="例如美团、滴滴、酒店名称"
+          validateStatus={errors.merchant ? 'error' : ''}
+          help={errors.merchant?.message}
+        >
+          <div>
+            <Input id="merchant" {...form.register('merchant')} />
           </div>
         </Form.Item>
         <Form.Item layout="vertical" label="币种" htmlFor="currency">
@@ -260,6 +297,16 @@ export function NewReportPage() {
         locale={{ emptyText: '还没有发票' }}
         columns={[
           { title: '发票号码', dataIndex: 'invoiceNumber', render: (number: string) => number || '待确认' },
+          {
+            title: '类别',
+            dataIndex: 'category',
+            render: (category: string | null) => (category ? labelOf(categoryLabel, category) : ''),
+          },
+          {
+            title: '来源',
+            dataIndex: 'merchant',
+            render: (merchant: string | null) => merchant || '',
+          },
           {
             title: '金额',
             render: (_, row) => (row.amountFen ? formatMoney(row.amountFen, row.currency) : ''),
@@ -475,6 +522,16 @@ function InvoiceTable({ report }: { report: ExpenseReportDetail }) {
         columns={[
           { title: '发票代码', dataIndex: 'invoiceCode', render: (code: string) => code || '—' },
           { title: '发票号码', dataIndex: 'invoiceNumber' },
+          {
+            title: '类别',
+            dataIndex: 'category',
+            render: (category: string | null) => (category ? labelOf(categoryLabel, category) : '未分类'),
+          },
+          {
+            title: '来源',
+            dataIndex: 'merchant',
+            render: (merchant: string | null) => merchant || '未填写',
+          },
           {
             title: '金额',
             render: (_, row) => (row.amountFen ? formatMoney(row.amountFen, row.currency) : ''),

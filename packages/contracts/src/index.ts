@@ -76,6 +76,9 @@ export const expenseReportActionSchema = z.enum([
 /** 票面币种。金额仍是两位小数的最小单位，不在币种之间换算。 */
 export const currencyCodeSchema = z.enum(['CNY', 'USD', 'EUR', 'HKD', 'GBP', 'JPY', 'SGD']);
 
+/** 吃穿住行。已结算费用按这个类别汇总。 */
+export const expenseCategorySchema = z.enum(['meal', 'clothing', 'lodging', 'transport']);
+
 export const expenseReportItemSchema = z.object({
   id: z.string().uuid(),
   status: expenseReportStatusSchema,
@@ -97,6 +100,8 @@ export const invoiceViewSchema = z.object({
   invoiceNumber: z.string(),
   amountFen: fenStringSchema.nullable(),
   currency: currencyCodeSchema,
+  category: expenseCategorySchema.nullable(),
+  merchant: z.string().nullable(),
   recognitionStatus: z.enum(['pending_confirmation', 'confirmed']),
   verificationStatus: z.literal('unverified'),
   binding: z.enum(['active', 'released']),
@@ -139,6 +144,24 @@ export const confirmInvoiceSchema = z.object({
   invoiceNumber: z.string().min(1).max(32),
   amountFen: fenStringSchema,
   currency: currencyCodeSchema.default('CNY'),
+  category: expenseCategorySchema,
+  merchant: z.string().trim().min(1).max(40),
+});
+
+export const settledSliceSchema = z.object({
+  key: z.string().min(1),
+  amountFen: fenStringSchema,
+});
+
+export const settledCurrencySchema = z.object({
+  currency: currencyCodeSchema,
+  totalFen: fenStringSchema,
+  byCategory: z.array(settledSliceSchema),
+  bySource: z.array(settledSliceSchema),
+});
+
+export const settledSummarySchema = z.object({
+  currencies: z.array(settledCurrencySchema),
 });
 
 export const financeAdjustmentSchema = z.object({
@@ -175,3 +198,4 @@ export type ExpenseReportList = z.infer<typeof expenseReportListSchema>;
 export type ExpenseReportDetail = z.infer<typeof expenseReportDetailSchema>;
 export type InvoiceView = z.infer<typeof invoiceViewSchema>;
 export type InvoiceList = z.infer<typeof invoiceListSchema>;
+export type SettledSummary = z.infer<typeof settledSummarySchema>;

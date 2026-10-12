@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { currencyCodeSchema, expenseReportDetailSchema, type ExpenseReportDetail } from '@frs/contracts';
+import { currencyCodeSchema, expenseCategorySchema, expenseReportDetailSchema, type ExpenseReportDetail } from '@frs/contracts';
 import {
   assertVerificationUnverified,
   ExpenseReportError,
@@ -45,6 +45,8 @@ export async function loadReport(tx: ReportTx, reportId: string): Promise<Expens
         invoiceNumber: line.invoice.invoiceNumber,
         amountFen: line.invoice.amountFen?.toString() ?? null,
         currency: currencyCodeSchema.parse(line.invoice.currency),
+        category: expenseCategorySchema.safeParse(line.invoice.category).data ?? null,
+        merchant: line.invoice.merchant?.trim() ? line.invoice.merchant.trim() : null,
         recognitionStatus: line.invoice.recognitionStatus,
         verificationStatus: line.invoice.verificationStatus,
         binding: line.invoice.binding,

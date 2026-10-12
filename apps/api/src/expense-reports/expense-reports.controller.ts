@@ -58,6 +58,16 @@ export class ExpenseReportsController {
     }
   }
 
+  @Get('expense-reports/settled')
+  async settled(@Req() request: AuthenticatedRequest) {
+    const employee = await this.employees.getOwn(request.claims);
+    try {
+      return await this.reports.settledSummary(employee.id);
+    } catch (error) {
+      rethrowAsHttp(error);
+    }
+  }
+
   @Get('expense-reports/:id')
   async detail(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     const employee = await this.employees.getOwn(request.claims);

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
-import { currencyCodeSchema, pageOffset, type InvoiceList, type InvoiceView } from '@frs/contracts';
+import { currencyCodeSchema, expenseCategorySchema, pageOffset, type InvoiceList, type InvoiceView } from '@frs/contracts';
 import {
   ExpenseReportError,
   assertVerificationUnverified,
@@ -77,12 +77,20 @@ export class InvoiceCommands {
   async confirm(
     ownerEmployeeId: string,
     invoiceId: string,
-    input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency?: string },
+    input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency?: string; category: string; merchant: string },
   ): Promise<InvoiceView> {
     const amount = parseFen(input.amountFen);
     const currency = currencyCodeSchema.safeParse(input.currency ?? 'CNY');
     if (!currency.success) {
       throw new ExpenseReportError('REQUEST_INVALID', '币种不受支持');
+    }
+    const category = expenseCategorySchema.safeParse(input.category);
+    if (!category.success) {
+      throw new ExpenseReportError('REQUEST_INVALID', '请选择吃穿住行中的一类');
+    }
+    const merchant = input.merchant.trim();
+    if (!merchant || merchant.length > 40) {
+      throw new ExpenseReportError('REQUEST_INVALID', '请填写商家或应用');
     }
     assertVerificationUnverified('unverified');
     if (!input.invoiceNumber.trim()) {
@@ -108,6 +116,8 @@ export class InvoiceCommands {
           invoiceNumber: input.invoiceNumber.trim(),
           amountFen: amount,
           currency: currency.data,
+          category: category.data,
+          merchant,
           recognitionStatus: confirmRecognition(invoice.recognitionStatus as RecognitionStatus),
           verificationStatus: 'unverified',
         },
@@ -210,6 +220,8 @@ function toInvoiceView(invoice: {
   invoiceNumber: string;
   amountFen: bigint | null;
   currency: string;
+  category: string | null;
+  merchant: string | null;
   recognitionStatus: string;
   verificationStatus: string;
   binding: string;
@@ -225,6 +237,8 @@ function toInvoiceView(invoice: {
     invoiceNumber: invoice.invoiceNumber,
     amountFen: invoice.amountFen?.toString() ?? null,
     currency: currency.data,
+    category: expenseCategorySchema.safeParse(invoice.category).success ? expenseCategorySchema.parse(invoice.category) : null,
+    merchant: invoice.merchant?.trim() ? invoice.merchant.trim() : null,
     recognitionStatus: invoice.recognitionStatus as InvoiceView['recognitionStatus'],
     verificationStatus: 'unverified',
     binding: invoice.binding as InvoiceView['binding'],

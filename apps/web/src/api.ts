@@ -1,9 +1,9 @@
-import type { EmployeeDirectory, EmployeeView, ExpenseReportDetail, ExpenseReportList, InvoiceList, InvoiceView } from '@frs/contracts';
+import type { EmployeeDirectory, EmployeeView, ExpenseReportDetail, ExpenseReportList, InvoiceList, InvoiceView, SettledSummary } from '@frs/contracts';
 import { authHeader } from './auth';
 
 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-export type { EmployeeDirectory, EmployeeView, ExpenseReportDetail, ExpenseReportList, InvoiceList, InvoiceView };
+export type { EmployeeDirectory, EmployeeView, ExpenseReportDetail, ExpenseReportList, InvoiceList, InvoiceView, SettledSummary };
 
 export class ApiError extends Error {
   readonly code: string;
@@ -53,6 +53,10 @@ export async function getExpenseReport(id: string): Promise<ExpenseReportDetail>
   return read(await request(`/expense-reports/${id}`));
 }
 
+export async function getSettledSummary(): Promise<SettledSummary> {
+  return read(await request('/expense-reports/settled'));
+}
+
 export async function listInvoices(page = 1, pageSize = 20): Promise<InvoiceList> {
   return read(await request(`/invoices?page=${page}&pageSize=${pageSize}`));
 }
@@ -72,7 +76,7 @@ export async function uploadInvoice(file: File): Promise<InvoiceView> {
 
 export async function confirmInvoice(
   id: string,
-  input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency: string },
+  input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency: string; category: string; merchant: string },
 ): Promise<InvoiceView> {
   return read(
     await request(`/invoices/${id}/confirm`, {

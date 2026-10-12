@@ -7,6 +7,7 @@ import { loginWithPassword, signOut, useSession } from './auth';
 import { BrandMark } from './brand';
 import { labelOf, roleLabel } from './labels';
 import { NewReportPage, ReportDetailPage, ReportListPage } from './report-pages';
+import { SettledPage } from './settled-page';
 
 const { Header, Content, Sider } = Layout;
 
@@ -25,7 +26,9 @@ export function App() {
       ? '/approvals'
       : location.pathname.startsWith('/expense-reports')
         ? '/expense-reports'
-        : '/';
+        : location.pathname.startsWith('/expenses')
+          ? '/expenses'
+          : '/';
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -69,6 +72,7 @@ export function App() {
             items={[
               { key: '/', label: <Link to="/">我的身份</Link> },
               { key: '/expense-reports', label: <Link to="/expense-reports">我的报销</Link> },
+              { key: '/expenses', label: <Link to="/expenses">已结算费用</Link> },
               { key: '/approvals', label: <Link to="/approvals">待我处理</Link> },
               { key: '/approvals/history', label: <Link to="/approvals/history">审批记录</Link> },
             ]}
@@ -96,6 +100,7 @@ export function App() {
                     />
                   }
                 />
+                <Route path="/expenses" element={<SettledPage enabled={session.authenticated} />} />
                 <Route path="/expense-reports" element={<ReportListPage enabled={session.authenticated} scope="own" />} />
                 <Route path="/expense-reports/new" element={<NewReportPage />} />
                 <Route path="/expense-reports/:id" element={<ReportDetailPage actorId={me.data?.id} />} />

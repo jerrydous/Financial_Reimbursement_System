@@ -20,9 +20,11 @@ describe('金额契约', () => {
   });
 
   it('确认发票可以选币种，不填则是人民币', () => {
-    expect(confirmInvoiceSchema.parse({ invoiceCode: '', invoiceNumber: '1', amountFen: '100' }).currency).toBe('CNY');
-    expect(confirmInvoiceSchema.safeParse({ invoiceCode: '', invoiceNumber: '1', amountFen: '100', currency: 'USD' }).success).toBe(true);
-    expect(confirmInvoiceSchema.safeParse({ invoiceCode: '', invoiceNumber: '1', amountFen: '100', currency: 'BTC' }).success).toBe(false);
+    const confirmed = { invoiceCode: '', invoiceNumber: '1', amountFen: '100', category: 'meal', merchant: '美团' };
+    expect(confirmInvoiceSchema.parse(confirmed).currency).toBe('CNY');
+    expect(confirmInvoiceSchema.safeParse({ ...confirmed, currency: 'USD' }).success).toBe(true);
+    expect(confirmInvoiceSchema.safeParse({ ...confirmed, currency: 'BTC' }).success).toBe(false);
+    expect(confirmInvoiceSchema.safeParse({ ...confirmed, category: 'office' }).success).toBe(false);
   });
 
   it('OpenAPI 从 Zod 生成，金额字段是 string', () => {

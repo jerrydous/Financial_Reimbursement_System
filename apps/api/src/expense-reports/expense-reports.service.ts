@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { expenseReportListSchema, pageOffset, type ExpenseReportList } from '@frs/contracts';
-import { reviewRecordActions } from '@frs/domain';
+import { expenseReportListSchema, pageOffset, settledSummarySchema, type ExpenseReportList, type SettledSummary } from '@frs/contracts';
+import { parseFen, reviewRecordActions, summarizeSettled } from '@frs/domain';
 import { PrismaService } from '../prisma.service';
 
 @Injectable()
@@ -38,6 +38,33 @@ export class ExpenseReportsService {
       page,
       pageSize,
       total,
+    });
+  }
+
+  async settledSummary(employeeId: string): Promise<SettledSummary> {
+    const reports = await this.prisma.expenseReport.findMany({
+      where: { employeeId, status: 'paid' },
+      include: { lines: { include: { invoice: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const summary = summarizeSettled(
+      reports.map((report) => ({
+        currency: report.currency,
+        amountFen: parseFen(report.amountFen.toString()),
+        lines: report.lines.map((line) => ({
+          amountFen: parseFen(line.amountFen.toString()),
+          category: line.invoice.category,
+          merchant: line.invoice.merchant,
+        })),
+      })),
+    );
+    return settledSummarySchema.parse({
+      currencies: summary.map((item) => ({
+        currency: item.currency,
+        totalFen: item.totalFen.toString(),
+        byCategory: item.byCategory.map((slice) => ({ key: slice.key, amountFen: slice.amountFen.toString() })),
+        bySource: item.bySource.map((slice) => ({ key: slice.key, amountFen: slice.amountFen.toString() })),
+      })),
     });
   }
 

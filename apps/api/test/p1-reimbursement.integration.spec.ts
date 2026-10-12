@@ -82,6 +82,8 @@ describe.skipIf(!dockerAvailable())('P1 对私闭环在真实 PostgreSQL 上保�
       invoiceCode: '011',
       invoiceNumber: number,
       amountFen: '3000',
+      category: 'meal',
+      merchant: '示例商家',
     });
     expect(confirmed.verificationStatus).toBe('unverified');
     return confirmed.id;

@@ -1,5 +1,24 @@
 import { fenToYuanText, parseFen } from '@frs/domain';
 
+export const categoryOptions = [
+  { value: 'meal', label: '餐饮' },
+  { value: 'clothing', label: '服饰' },
+  { value: 'lodging', label: '住宿' },
+  { value: 'transport', label: '交通' },
+] as const;
+
+export const categoryLabel: Record<string, string> = {
+  meal: '餐饮',
+  clothing: '服饰',
+  lodging: '住宿',
+  transport: '交通',
+  unset: '未分类',
+};
+
+export function sourceLabel(key: string): string {
+  return key === 'unset' ? '未填写' : key;
+}
+
 export const currencyOptions = [
   { value: 'CNY', label: '人民币 CNY' },
   { value: 'USD', label: '美元 USD' },
