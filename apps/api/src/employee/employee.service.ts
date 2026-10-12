@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import {
   assertCanBindSubject,
   assertSameSubject,
@@ -22,7 +22,7 @@ type EmployeeRecord = {
 
 @Injectable()
 export class EmployeeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async getOwn(claims: AccessTokenClaims): Promise<EmployeeView> {
     const existing = await this.prisma.employee.findUnique({
@@ -70,6 +70,23 @@ export class EmployeeService {
       }
     }
     return toView(current);
+  }
+
+  async listColleagues(actorId: string): Promise<{ id: string; name: string; role: 'employee' | 'manager' | 'finance' | 'cashier' }[]> {
+    const self = await this.prisma.employee.findUnique({ where: { id: actorId } });
+    if (!self) {
+      return [];
+    }
+    const rows = await this.prisma.employee.findMany({
+      where: { companyId: self.companyId, NOT: { id: actorId } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, role: true },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      role: row.role as 'employee' | 'manager' | 'finance' | 'cashier',
+    }));
   }
 }
 

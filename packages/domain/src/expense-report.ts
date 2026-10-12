@@ -1,12 +1,10 @@
+import { DomainError } from './domain-error';
 import { compareFen, parseFen, type Fen } from './money';
 
-export class ExpenseReportError extends Error {
-  readonly code: string;
-
+export class ExpenseReportError extends DomainError {
   constructor(code: string, message: string) {
-    super(message);
+    super(code, message);
     this.name = 'ExpenseReportError';
-    this.code = code;
   }
 }
 
@@ -35,6 +33,7 @@ export const expenseReportActions = [
   'pay_success',
   'pay_fail',
   'revise',
+  'skip_to_finance',
 ] as const;
 
 export type ExpenseReportAction = (typeof expenseReportActions)[number];
@@ -55,6 +54,7 @@ type Transition = {
 export const expenseReportTransitions: readonly Transition[] = [
   { from: 'draft', action: 'submit', to: 'submitted' },
   { from: 'submitted', action: 'start_approval', to: 'approving' },
+  { from: 'submitted', action: 'skip_to_finance', to: 'finance_review' },
   { from: 'submitted', action: 'withdraw', to: 'withdrawn' },
   { from: 'approving', action: 'approve', to: 'finance_review' },
   { from: 'approving', action: 'reject', to: 'rejected' },
@@ -120,7 +120,7 @@ export function actorForAction(
   if (action === 'submit' || action === 'revise' || action === 'withdraw') {
     return assignment.ownerId;
   }
-  if (action === 'start_approval') {
+  if (action === 'start_approval' || action === 'skip_to_finance') {
     return 'system';
   }
   if (!assignment.currentActorId) {
@@ -142,6 +142,9 @@ export function nextActorAfter(
 ): string | null {
   if (action === 'start_approval') {
     return targets.managerId;
+  }
+  if (action === 'skip_to_finance') {
+    return targets.financeId;
   }
   if (action === 'approve') {
     return targets.financeId;

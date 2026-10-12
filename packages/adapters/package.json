@@ -5,21 +5,27 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1148.0",
-    "@temporalio/client": "^1.24.0",
     "@aws-sdk/s3-request-presigner": "^3.1148.0",
     "@frs/domain": "workspace:*",
     "@smithy/node-http-handler": "^4.12.1",
+    "@temporalio/client": "^1.24.0",
+    "bullmq": "^5.58.5",
     "casbin": "^5.51.1",
+    "exceljs": "^4.4.0",
+    "json-rules-engine": "^7.3.1",
     "express-session": "^1.18.1",
-    "keycloak-connect": "^26.1.1"
+    "keycloak-connect": "^26.1.1",
+    "tencentcloud-sdk-nodejs-ocr": "4.1.115"
   },
   "devDependencies": {
     "@types/express-session": "^1.18.2",
     "@types/node": "^22.15.30",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   }
 }

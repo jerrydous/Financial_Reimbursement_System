@@ -1,16 +1,14 @@
-import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Descriptions, Form, Input, Space, Table, Typography } from 'antd';
+import { App as AntdApp, Button, Dropdown, Form, Input, Modal, Select, Space, Table, Typography } from 'antd';
 import { fenToYuanText, parseFen, yuanTextToFen } from '@frs/domain';
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { z } from 'zod';
 import {
   confirmInvoice,
   createExpenseReport,
   getExpenseReport,
-  invoiceContentUrl,
+  listColleagues,
+  listDocuments,
   listExpenseReports,
   listInvoices,
   postAction,
@@ -18,53 +16,133 @@ import {
   uploadInvoice,
   type ExpenseReportDetail,
 } from './api';
+import { InvoicePreview, useInvoicePreview } from './invoice-preview';
+import { actionLabel, formatWhen, isActiveStatus, roleLabel, shortNo, statusLabel, verificationLabel } from './labels';
 
-const statusLabel: Record<string, string> = {
-  draft: '草稿',
-  submitted: '已提交',
-  approving: '主管审批',
-  finance_review: '财务审核',
-  paying: '待支付',
-  paid: '已支付',
-  rejected: '已驳回',
-  withdrawn: '已撤回',
-};
+const yuanPattern = /^\d+\.\d{2}$/;
 
-const confirmForm = z.object({
-  invoiceCode: z.string(),
-  invoiceNumber: z.string().min(1, '填写发票号码'),
-  yuan: z.string().regex(/^\d+\.\d{2}$/, '金额写成 0.00'),
-});
+const documentTabs = [
+  { key: 'expense', label: '报销单' },
+  { key: 'application', label: '申请单' },
+  { key: 'loan', label: '借款单' },
+  { key: 'contract', label: '合同' },
+  { key: 'installment', label: '分期付款单' },
+  { key: 'repayment', label: '还款单' },
+  { key: 'payment', label: '付款单' },
+] as const;
 
 export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: boolean }) {
+  const [kind, setKind] = useState<(typeof documentTabs)[number]['key']>('expense');
+  const [queue, setQueue] = useState<'pending' | 'handled'>('pending');
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
+  const handled = inbox && queue === 'handled';
   const list = useQuery({
-    queryKey: ['expense-reports', inbox],
-    enabled,
-    queryFn: () => listExpenseReports(inbox),
+    queryKey: ['expense-reports', inbox, handled, page, pageSize],
+    enabled: enabled && (inbox || kind === 'expense'),
+    queryFn: () => listExpenseReports(inbox, page, pageSize, handled),
   });
+  const documents = useQuery({
+    queryKey: ['documents', kind, page, pageSize],
+    enabled: enabled && !inbox && kind !== 'expense',
+    queryFn: () => listDocuments(kind, page, pageSize),
+  });
+  const createPath =
+    kind === 'application' ? '/applications/new' : kind === 'loan' ? '/loans/new' : kind === 'contract' ? '/contracts/new' : '';
   if (!enabled) {
-    return <Typography.Paragraph>请先登录。</Typography.Paragraph>;
+    return <section className="panel">请先登录。</section>;
   }
   return (
-    <>
-      {inbox ? null : (
-        <Link to="/expense-reports/new">
-          <Button type="primary" style={{ marginBottom: 16 }}>
-            新建报销单
-          </Button>
-        </Link>
+    <section className="panel">
+      {inbox ? (
+        <div className="tab-row">
+          <button
+            type="button"
+            className={queue === 'pending' ? 'tab active' : 'tab'}
+            onClick={() => {
+              setQueue('pending');
+              setPage(1);
+            }}
+          >
+            待我处理
+          </button>
+          <button
+            type="button"
+            className={queue === 'handled' ? 'tab active' : 'tab'}
+            onClick={() => {
+              setQueue('handled');
+              setPage(1);
+            }}
+          >
+            我已处理
+          </button>
+        </div>
+      ) : (
+        <div className="tab-row">
+          {documentTabs.map((tab) => (
+            <button key={tab.key} type="button" className={kind === tab.key ? 'tab active' : 'tab'} onClick={() => setKind(tab.key)}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
       )}
+      <div className="panel-head">
+        <h3>{inbox ? (handled ? '我已处理' : '待我处理') : '我的单据'}</h3>
+        {inbox || !createPath ? (
+          inbox || kind !== 'expense' ? null : (
+            <Link to="/ledger/new">
+              <Button type="primary">新建单据</Button>
+            </Link>
+          )
+        ) : (
+          <Link to={createPath}>
+            <Button type="primary">新建</Button>
+          </Link>
+        )}
+      </div>
+      {kind !== 'expense' && !inbox ? (
+        <Table
+          rowKey="id"
+          loading={documents.isLoading}
+          dataSource={documents.data?.items ?? []}
+          locale={{ emptyText: '还没有这类单据' }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: documents.data?.total ?? 0,
+            showSizeChanger: false,
+            onChange: setPage,
+          }}
+          columns={[
+            { title: '单号', dataIndex: 'id', render: (id: string) => shortNo(id) },
+            { title: '标题', dataIndex: 'title' },
+            { title: '状态', dataIndex: 'status', render: (status: string) => statusLabel[status] ?? status },
+            {
+              title: '金额（元）',
+              dataIndex: 'amountFen',
+              render: (amountFen: string) => fenToYuanText(parseFen(amountFen)),
+            },
+            { title: '时间', dataIndex: 'createdAt', render: (value: string) => formatWhen(value) },
+          ]}
+        />
+      ) : (
       <Table
         rowKey="id"
         loading={list.isLoading}
         dataSource={list.data?.items ?? []}
-        locale={{ emptyText: inbox ? '没有待处理的单据' : '暂无报销单' }}
-        pagination={false}
+        locale={{ emptyText: handled ? '还没有审批记录' : inbox ? '没有待处理的单据' : '还没有报销单' }}
+        pagination={{
+          current: page,
+          pageSize,
+          total: list.data?.total ?? 0,
+          showSizeChanger: false,
+          onChange: setPage,
+        }}
         columns={[
           {
             title: '单号',
             dataIndex: 'id',
-            render: (id: string) => <Link to={`/expense-reports/${id}`}>{id}</Link>,
+            render: (id: string) => <Link to={`/expense-reports/${id}`}>{shortNo(id)}</Link>,
           },
           { title: '状态', dataIndex: 'status', render: (status: string) => statusLabel[status] ?? status },
           {
@@ -72,231 +150,450 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
             dataIndex: 'amountFen',
             render: (amountFen: string) => fenToYuanText(parseFen(amountFen)),
           },
-          { title: '创建时间', dataIndex: 'createdAt' },
+          { title: '创建时间', dataIndex: 'createdAt', render: (value: string) => formatWhen(value) },
         ]}
       />
-    </>
+      )}
+      {list.error instanceof Error ? <Typography.Text type="danger">{list.error.message}</Typography.Text> : null}
+    </section>
   );
 }
 
 export function NewReportPage() {
   const navigate = useNavigate();
   const client = useQueryClient();
-  const invoices = useQuery({ queryKey: ['invoices'], queryFn: listInvoices });
+  const { message } = AntdApp.useApp();
+  const [page, setPage] = useState(1);
+  const invoices = useQuery({ queryKey: ['invoices', page], queryFn: () => listInvoices(page) });
   const [selected, setSelected] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
-  const [idempotencyKey] = useState(() => crypto.randomUUID());
-  const form = useForm<z.infer<typeof confirmForm>>({
-    resolver: zodResolver(confirmForm),
-    defaultValues: { invoiceCode: '', invoiceNumber: '', yuan: '' },
-  });
-  const upload = useMutation({
-    mutationFn: async (values: z.infer<typeof confirmForm>) => {
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [sellerName, setSellerName] = useState('');
+  const [form] = Form.useForm<{ invoiceCode?: string; invoiceNumber: string; yuan: string }>();
+  const pendingKey = useRef<{ fingerprint: string; key: string } | null>(null);
+  const recognize = useMutation({
+    mutationFn: async () => {
       if (!file) {
-        throw new Error('FILE_REQUIRED');
+        throw new Error('请先选择发票影像');
       }
-      const stored = await uploadInvoice(file);
-      const amountFen = yuanTextToFen(values.yuan).toString();
-      await confirmInvoice(stored.id, {
-        invoiceCode: values.invoiceCode,
-        invoiceNumber: values.invoiceNumber,
-        amountFen,
+      return uploadInvoice(file);
+    },
+    onSuccess: (stored) => {
+      setDraftId(stored.id);
+      setSellerName(stored.sellerName);
+      form.setFieldsValue({
+        invoiceCode: stored.invoiceCode,
+        invoiceNumber: stored.invoiceNumber,
+        yuan: stored.amountFen ? fenToYuanText(parseFen(stored.amountFen)) : '',
       });
+      if (stored.reused) {
+        message.info('这张影像之前传过，已使用原来的发票');
+      } else if (stored.ocrStatus === 'recognized') {
+        message.success(stored.sellerName ? `已识别：${stored.sellerName}` : '已识别发票内容，请核对后确认');
+      } else {
+        message.info(stored.ocrMessage || '请手工填写发票内容');
+      }
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '发票没有上传');
+    },
+  });
+  const confirm = useMutation({
+    mutationFn: async (values: { invoiceCode?: string; invoiceNumber: string; yuan: string }) => {
+      if (!draftId) {
+        throw new Error('请先上传并识别发票');
+      }
+      await confirmInvoice(draftId, {
+        invoiceCode: values.invoiceCode ?? '',
+        invoiceNumber: values.invoiceNumber,
+        amountFen: yuanTextToFen(values.yuan).toString(),
+      });
+    },
+    onSuccess: async () => {
+      message.success('发票已确认，可以加入报销单');
+      form.resetFields();
+      setFile(null);
+      setDraftId(null);
+      setSellerName('');
       await client.invalidateQueries({ queryKey: ['invoices'] });
-      return stored.id;
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '发票没有确认');
     },
   });
   const submit = useMutation({
     mutationFn: async () => {
-      const draft = await createExpenseReport(selected, idempotencyKey);
-      return submitExpenseReport(draft.id, `${idempotencyKey}:submit`);
+      const fingerprint = [...selected].sort().join(',');
+      if (!pendingKey.current || pendingKey.current.fingerprint !== fingerprint) {
+        pendingKey.current = { fingerprint, key: crypto.randomUUID() };
+      }
+      const key = pendingKey.current.key;
+      const draft = await createExpenseReport(selected, key);
+      return submitExpenseReport(draft.id, `${key}:submit`);
     },
     onSuccess: (report) => {
+      pendingKey.current = null;
       void navigate(`/expense-reports/${report.id}`);
     },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '报销单没有提交');
+    },
   });
+  const available = (invoices.data?.items ?? []).filter((item) => item.recognitionStatus === 'confirmed' && item.binding === 'released');
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      <Typography.Title level={4}>上传发票并人工确认</Typography.Title>
-      <Typography.Paragraph type="secondary">
-        规格没有点名识票厂商，这里不会自动填入识别结果。请对照影像自己确认号码和金额。验真状态保持为未验真。
-      </Typography.Paragraph>
-      <input
-        type="file"
-        accept="image/jpeg,image/png,application/pdf"
-        onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-      />
-      <Form
-        layout="vertical"
-        onFinish={form.handleSubmit((values) => {
-          void upload.mutateAsync(values);
-        })}
+    <div className="page">
+      <section className="panel">
+        <div className="panel-head">
+          <h3>记费用</h3>
+          <Typography.Text className="quiet">上传后由腾讯云增值税发票识别填写草稿。请核对后再确认，验真状态仍是未验真。</Typography.Text>
+        </div>
+        <Form
+          form={form}
+          layout="vertical"
+          requiredMark={false}
+          onFinish={(values) => {
+            void confirm.mutateAsync(values);
+          }}
+        >
+          <Form.Item label="发票影像" extra="支持 PDF、JPEG、PNG">
+            <input
+              type="file"
+              accept="image/jpeg,image/png,application/pdf"
+              style={{ display: 'none' }}
+              id="invoice-file"
+              onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            />
+            <Space>
+              <Button onClick={() => document.getElementById('invoice-file')?.click()}>{file ? file.name : '选择发票影像'}</Button>
+              <Button type="primary" loading={recognize.isPending} disabled={!file} onClick={() => void recognize.mutateAsync()}>
+                识别发票
+              </Button>
+            </Space>
+          </Form.Item>
+          {sellerName ? <Typography.Paragraph>销售方：{sellerName}</Typography.Paragraph> : null}
+          <Form.Item label="发票代码" name="invoiceCode">
+            <Input placeholder="数电票可以留空" />
+          </Form.Item>
+          <Form.Item label="发票号码" name="invoiceNumber" rules={[{ required: true, message: '填写发票号码' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item
+            label="价税合计（元）"
+            name="yuan"
+            rules={[{ required: true, message: '填写金额' }, { pattern: yuanPattern, message: '写成 12.30 这样的两位小数' }]}
+          >
+            <Input placeholder="12.30" style={{ maxWidth: 240 }} />
+          </Form.Item>
+          <Button htmlType="submit" loading={confirm.isPending} disabled={!draftId}>
+            确认发票
+          </Button>
+        </Form>
+      </section>
+      <section className="panel">
+        <div className="panel-head">
+          <h3>选择要报销的发票</h3>
+          <Button type="primary" disabled={selected.length === 0} loading={submit.isPending} onClick={() => void submit.mutateAsync()}>
+            提交报销
+          </Button>
+        </div>
+        <Table
+          rowKey="id"
+          rowSelection={{ selectedRowKeys: selected, onChange: (keys) => setSelected(keys.map(String)) }}
+          dataSource={available}
+          locale={{ emptyText: '还没有已确认且未占用的发票' }}
+          pagination={{
+            current: page,
+            pageSize: 20,
+            total: invoices.data?.total ?? 0,
+            showSizeChanger: false,
+            onChange: setPage,
+          }}
+          columns={[
+            { title: '发票号码', dataIndex: 'invoiceNumber' },
+            {
+              title: '金额（元）',
+              dataIndex: 'amountFen',
+              render: (amount: string | null) => (amount ? fenToYuanText(parseFen(amount)) : ''),
+            },
+            { title: '验真', dataIndex: 'verificationStatus', render: (value: string) => verificationLabel[value] ?? '未验真' },
+          ]}
+        />
+      </section>
+    </div>
+  );
+}
+
+export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
+  const { id = '' } = useParams();
+  const { message } = AntdApp.useApp();
+  const client = useQueryClient();
+  const report = useQuery({
+    queryKey: ['expense-report', id],
+    queryFn: () => getExpenseReport(id),
+    refetchInterval: (query) => (query.state.data && isActiveStatus(query.state.data.status) ? 5000 : false),
+  });
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [transferTo, setTransferTo] = useState<string>();
+  const [approvedYuan, setApprovedYuan] = useState('');
+  const [amountError, setAmountError] = useState('');
+  const colleagues = useQuery({
+    queryKey: ['colleagues'],
+    queryFn: listColleagues,
+    enabled: transferOpen,
+  });
+  const act = useMutation({
+    mutationFn: (input: { action: string; body?: unknown; key?: string }) => postAction(id, input.action, input.body, input.key),
+    onSuccess: async () => {
+      setTransferOpen(false);
+      setAdjustOpen(false);
+      setAmountError('');
+      await client.invalidateQueries({ queryKey: ['expense-report', id] });
+      await client.invalidateQueries({ queryKey: ['expense-reports'] });
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '操作没有完成');
+    },
+  });
+  if (!report.data) {
+    return <section className="panel">{report.isLoading ? '正在读取…' : '没有这张报销单'}</section>;
+  }
+  const current = report.data;
+  const mine = current.currentActorId === actorId;
+  const owner = current.employeeId === actorId;
+  const actions = detailActions(current, mine, owner);
+
+  return (
+    <div className="page">
+      <section className="panel">
+        <div className="detail-bar">
+          <div>
+            <Link to="/expense-reports">返回单据</Link>
+            <h3 className="section-title" style={{ marginTop: 8 }}>
+              报销单 {shortNo(current.id)}
+            </h3>
+            <div className="quiet">{statusLabel[current.status] ?? current.status}</div>
+          </div>
+          <div className="detail-actions">
+            {actions.primary ? (
+              <Button type="primary" loading={act.isPending} onClick={() => void runAction(actions.primary, act.mutateAsync)}>
+                {actions.primary.label}
+              </Button>
+            ) : null}
+            {actions.more.length > 0 ? (
+              <Dropdown
+                menu={{
+                  items: actions.more.map((item) => ({ key: item.key, label: item.label, danger: item.danger })),
+                  onClick: ({ key }) => {
+                    const item = actions.more.find((entry) => entry.key === key);
+                    if (!item) {
+                      return;
+                    }
+                    if (item.key === 'transfer') {
+                      setTransferOpen(true);
+                      return;
+                    }
+                    if (item.key === 'adjust') {
+                      setAdjustOpen(true);
+                      return;
+                    }
+                    void runAction(item, act.mutateAsync);
+                  },
+                }}
+              >
+                <Button>更多</Button>
+              </Dropdown>
+            ) : null}
+          </div>
+        </div>
+      </section>
+      <section className="panel">
+        <Space size="large" wrap>
+          <div>
+            <div className="quiet">金额（元）</div>
+            <strong>{fenToYuanText(parseFen(current.amountFen))}</strong>
+          </div>
+          <div>
+            <div className="quiet">员工原始金额</div>
+            <div>{current.submittedAmountFen ? fenToYuanText(parseFen(current.submittedAmountFen)) : '尚未提交'}</div>
+          </div>
+          <div>
+            <div className="quiet">批准金额</div>
+            <div>{current.approvedAmountFen ? fenToYuanText(parseFen(current.approvedAmountFen)) : '尚未提交'}</div>
+          </div>
+        </Space>
+        {current.warnings.length > 0 ? (
+          <div style={{ marginTop: 16 }}>
+            {current.warnings.map((warning) => (
+              <Typography.Paragraph key={warning.message} type="warning" style={{ marginBottom: 4 }}>
+                {warning.message}
+              </Typography.Paragraph>
+            ))}
+          </div>
+        ) : null}
+      </section>
+      <section className="panel">
+        <h3 className="section-title" style={{ marginBottom: 16 }}>发票</h3>
+        <InvoiceTable report={current} />
+      </section>
+      <section className="panel">
+        <h3 className="section-title" style={{ marginBottom: 16 }}>处理记录</h3>
+        <Table
+          rowKey={(row) => `${row.action}-${row.createdAt}`}
+          dataSource={current.audits}
+          pagination={false}
+          locale={{ emptyText: '还没有处理记录' }}
+          columns={[
+            { title: '动作', dataIndex: 'action', render: (value: string) => actionLabel[value] ?? value },
+            { title: '操作者', dataIndex: 'actorName' },
+            { title: '从', dataIndex: 'fromStatus', render: (value: string) => statusLabel[value] ?? value },
+            { title: '到', dataIndex: 'toStatus', render: (value: string) => statusLabel[value] ?? value },
+            { title: '时间', dataIndex: 'createdAt', render: (value: string) => formatWhen(value) },
+          ]}
+        />
+      </section>
+      <Modal
+        title="转交"
+        open={transferOpen}
+        confirmLoading={act.isPending}
+        onCancel={() => setTransferOpen(false)}
+        onOk={() => {
+          if (!transferTo) {
+            message.warning('选择转交对象');
+            return;
+          }
+          void act.mutateAsync({ action: 'transfer', body: { transferToEmployeeId: transferTo } });
+        }}
       >
-        <Form.Item label="发票代码">
-          <Input {...form.register('invoiceCode')} placeholder="数电票可以留空" />
-        </Form.Item>
-        <Form.Item label="发票号码" validateStatus={form.formState.errors.invoiceNumber ? 'error' : ''}>
-          <Input {...form.register('invoiceNumber')} />
-        </Form.Item>
-        <Form.Item label="价税合计（元）" extra="必须带两位小数，例如 12.30" validateStatus={form.formState.errors.yuan ? 'error' : ''}>
-          <Input {...form.register('yuan')} />
-        </Form.Item>
-        <Button htmlType="submit" loading={upload.isPending}>
-          保存这张发票
-        </Button>
-      </Form>
+        <Select
+          style={{ width: '100%' }}
+          placeholder="选择同事"
+          loading={colleagues.isLoading}
+          value={transferTo}
+          onChange={setTransferTo}
+          options={(colleagues.data ?? []).map((person) => ({
+            value: person.id,
+            label: `${person.name} · ${roleLabel[person.role] ?? person.role}`,
+          }))}
+        />
+      </Modal>
+      <Modal
+        title="调整批准金额"
+        open={adjustOpen}
+        confirmLoading={act.isPending}
+        onCancel={() => {
+          setAdjustOpen(false);
+          setAmountError('');
+        }}
+        onOk={() => {
+          if (!yuanPattern.test(approvedYuan.trim())) {
+            setAmountError('写成 12.30 这样的两位小数');
+            return;
+          }
+          let fen: string;
+          try {
+            fen = yuanTextToFen(approvedYuan.trim()).toString();
+          } catch (error) {
+            setAmountError(error instanceof Error ? error.message : '金额不合法');
+            return;
+          }
+          void act.mutateAsync({ action: 'finance-adjustment', body: { approvedAmountFen: fen } });
+        }}
+      >
+        <Input placeholder="12.30" value={approvedYuan} status={amountError ? 'error' : ''} onChange={(event) => setApprovedYuan(event.target.value)} />
+        {amountError ? <div style={{ color: '#cf1322', marginTop: 8 }}>{amountError}</div> : null}
+      </Modal>
+    </div>
+  );
+}
+
+type DetailAction = {
+  key: string;
+  label: string;
+  danger?: boolean;
+  action?: string;
+  body?: unknown;
+  keySuffix?: string;
+};
+
+function detailActions(current: ExpenseReportDetail, mine: boolean, owner: boolean): { primary: DetailAction | null; more: DetailAction[] } {
+  const more: DetailAction[] = [];
+  let primary: DetailAction | null = null;
+  if (current.status === 'approving' && mine) {
+    primary = { key: 'approve', label: '同意', action: 'approve' };
+  }
+  if (current.status === 'finance_review' && mine) {
+    primary = { key: 'finance-approve', label: '通过', action: 'finance-approve' };
+    more.push({ key: 'adjust', label: '调整批准金额' });
+  }
+  if (current.status === 'paying' && mine) {
+    primary = { key: 'pay', label: '确认支付', action: 'payments', body: { outcome: 'succeeded' }, keySuffix: 'pay' };
+  }
+  if ((current.status === 'rejected' || current.status === 'withdrawn') && owner) {
+    primary = { key: 'revise', label: '改回草稿', action: 'revise' };
+  }
+  if ((current.status === 'approving' || current.status === 'finance_review') && mine) {
+    more.push({ key: 'reject', label: '驳回', danger: true, action: 'reject' });
+  }
+  if ((current.status === 'submitted' || current.status === 'approving') && owner) {
+    more.push({ key: 'withdraw', label: '撤回', action: 'withdraw' });
+  }
+  if (mine && current.currentStep) {
+    more.push({ key: 'transfer', label: '转交' });
+  }
+  return { primary, more };
+}
+
+function runAction(
+  item: DetailAction | null,
+  mutate: (input: { action: string; body?: unknown; key?: string }) => Promise<unknown>,
+): void {
+  if (!item?.action) {
+    return;
+  }
+  void mutate({
+    action: item.action,
+    body: item.body,
+    key: item.keySuffix ? crypto.randomUUID() : undefined,
+  });
+}
+
+function InvoiceTable({ report }: { report: ExpenseReportDetail }) {
+  const preview = useInvoicePreview();
+  return (
+    <>
       <Table
         rowKey="id"
-        rowSelection={{ selectedRowKeys: selected, onChange: (keys) => setSelected(keys.map(String)) }}
-        dataSource={(invoices.data?.items ?? []).filter((item) => item.recognitionStatus === 'confirmed' && item.binding === 'released')}
+        dataSource={report.invoices}
         pagination={false}
-        locale={{ emptyText: '还没有已确认且未占用的发票' }}
         columns={[
+          { title: '发票代码', dataIndex: 'invoiceCode', render: (value: string) => value || '—' },
           { title: '发票号码', dataIndex: 'invoiceNumber' },
           {
             title: '金额（元）',
             dataIndex: 'amountFen',
             render: (amount: string | null) => (amount ? fenToYuanText(parseFen(amount)) : ''),
           },
-          { title: '验真', render: () => '未验真' },
+          { title: '验真', dataIndex: 'verificationStatus', render: (value: string) => verificationLabel[value] ?? '未验真' },
+          {
+            title: '影像',
+            render: (_, row) => (
+              <Button type="link" size="small" loading={preview.loading} onClick={() => void preview.show(row.id)}>
+                查看
+              </Button>
+            ),
+          },
         ]}
       />
-      <Button type="primary" disabled={selected.length === 0} loading={submit.isPending} onClick={() => void submit.mutateAsync()}>
-        提交报销单
-      </Button>
-      {submit.error instanceof Error ? <Typography.Text type="danger">{submit.error.message}</Typography.Text> : null}
-    </Space>
-  );
-}
-
-export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
-  const { id = '' } = useParams();
-  const client = useQueryClient();
-  const report = useQuery({ queryKey: ['expense-report', id], queryFn: () => getExpenseReport(id), refetchInterval: 2000 });
-  const [approvedYuan, setApprovedYuan] = useState('');
-  const [transferTo, setTransferTo] = useState('');
-  const act = useMutation({
-    mutationFn: (input: { action: string; body?: unknown; key?: string }) => postAction(id, input.action, input.body, input.key),
-    onSuccess: async () => {
-      await client.invalidateQueries({ queryKey: ['expense-report', id] });
-    },
-  });
-  if (!report.data) {
-    return <Typography.Paragraph>{report.isLoading ? '正在读取…' : '没有这张报销单'}</Typography.Paragraph>;
-  }
-  const current = report.data;
-  const mine = current.currentActorId === actorId;
-  return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      <Descriptions title="报销单" bordered column={1}>
-        <Descriptions.Item label="状态">{statusLabel[current.status] ?? current.status}</Descriptions.Item>
-        <Descriptions.Item label="金额（元）">{fenToYuanText(parseFen(current.amountFen))}</Descriptions.Item>
-        <Descriptions.Item label="员工原始金额（元）">
-          {current.submittedAmountFen ? fenToYuanText(parseFen(current.submittedAmountFen)) : '尚未提交'}
-        </Descriptions.Item>
-        <Descriptions.Item label="批准金额（元）">
-          {current.approvedAmountFen ? fenToYuanText(parseFen(current.approvedAmountFen)) : '尚未提交'}
-        </Descriptions.Item>
-      </Descriptions>
-      <InvoiceTable report={current} />
-      <Space wrap>
-        {current.status === 'approving' && mine ? (
-          <Button onClick={() => void act.mutateAsync({ action: 'approve' })}>同意</Button>
-        ) : null}
-        {(current.status === 'approving' || current.status === 'finance_review') && mine ? (
-          <Button danger onClick={() => void act.mutateAsync({ action: 'reject' })}>
-            驳回
-          </Button>
-        ) : null}
-        {(current.status === 'submitted' || current.status === 'approving') && current.employeeId === actorId ? (
-          <Button onClick={() => void act.mutateAsync({ action: 'withdraw' })}>撤回</Button>
-        ) : null}
-        {current.status === 'finance_review' && mine ? (
-          <>
-            <Input style={{ width: 160 }} placeholder="批准金额 0.00" value={approvedYuan} onChange={(event) => setApprovedYuan(event.target.value)} />
-            <Button
-              onClick={() =>
-                void act.mutateAsync({
-                  action: 'finance-adjustment',
-                  body: { approvedAmountFen: yuanTextToFen(approvedYuan).toString() },
-                })
-              }
-            >
-              修改批准金额
-            </Button>
-            <Button type="primary" onClick={() => void act.mutateAsync({ action: 'finance-approve' })}>
-              财务通过
-            </Button>
-          </>
-        ) : null}
-        {current.status === 'paying' && mine ? (
-          <Button
-            type="primary"
-            onClick={() => void act.mutateAsync({ action: 'payments', body: { outcome: 'succeeded' }, key: crypto.randomUUID() })}
-          >
-            确认支付
-          </Button>
-        ) : null}
-        {(current.status === 'rejected' || current.status === 'withdrawn') ? (
-          <Button onClick={() => void act.mutateAsync({ action: 'revise' })}>改回草稿</Button>
-        ) : null}
-        {mine && current.currentStep ? (
-          <>
-            <Input style={{ width: 280 }} placeholder="转交给员工 ID" value={transferTo} onChange={(event) => setTransferTo(event.target.value)} />
-            <Button onClick={() => void act.mutateAsync({ action: 'transfer', body: { transferToEmployeeId: transferTo } })}>转交</Button>
-          </>
-        ) : null}
-      </Space>
-      {current.status === 'paid' ? <Typography.Text>支付成功后金额不能再改。</Typography.Text> : null}
-      <Table
-        rowKey={(row) => `${row.action}-${row.createdAt}`}
-        dataSource={current.audits}
-        pagination={false}
-        locale={{ emptyText: '还没有审计记录' }}
-        columns={[
-          { title: '动作', dataIndex: 'action' },
-          { title: '操作者', dataIndex: 'actorId' },
-          { title: '从', dataIndex: 'fromStatus' },
-          { title: '到', dataIndex: 'toStatus' },
-          { title: '时间', dataIndex: 'createdAt' },
-        ]}
+      <InvoicePreview
+        open={preview.open}
+        loading={preview.loading}
+        error={preview.error}
+        imageUrl={preview.imageUrl}
+        pages={preview.pages}
+        onClose={preview.close}
       />
-      {act.error instanceof Error ? <Typography.Text type="danger">{act.error.message}</Typography.Text> : null}
-    </Space>
-  );
-}
-
-function InvoiceTable({ report }: { report: ExpenseReportDetail }) {
-  const open = useMutation({
-    mutationFn: (invoiceId: string) => invoiceContentUrl(invoiceId),
-    onSuccess: (result) => {
-      window.open(result.url, '_blank', 'noopener');
-    },
-  });
-  return (
-    <Table
-      rowKey="id"
-      dataSource={report.invoices}
-      pagination={false}
-      columns={[
-        { title: '发票代码', dataIndex: 'invoiceCode' },
-        { title: '发票号码', dataIndex: 'invoiceNumber' },
-        {
-          title: '金额（元）',
-          dataIndex: 'amountFen',
-          render: (amount: string | null) => (amount ? fenToYuanText(parseFen(amount)) : ''),
-        },
-        { title: '验真', render: () => '未验真' },
-        {
-          title: '影像',
-          render: (_, row) => (
-            <Button size="small" onClick={() => void open.mutateAsync(row.id)}>
-              短时查看
-            </Button>
-          ),
-        },
-      ]}
-    />
+    </>
   );
 }

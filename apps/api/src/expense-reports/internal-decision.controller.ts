@@ -5,6 +5,7 @@ import {
   Headers,
   HttpException,
   HttpStatus,
+  Inject,
   Param,
   Post,
 } from '@nestjs/common';
@@ -23,7 +24,7 @@ function tokenMatches(provided: string, expected: string): boolean {
 
 @Controller()
 export class InternalDecisionController {
-  constructor(private readonly commands: ExpenseReportCommands) {}
+  constructor(@Inject(ExpenseReportCommands) private readonly commands: ExpenseReportCommands) {}
 
   @Post('internal/expense-reports/:id/decisions')
   async decide(
