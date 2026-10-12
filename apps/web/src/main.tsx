@@ -16,17 +16,7 @@ if (!root) {
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ConfigProvider
-        locale={zhCN}
-        button={{ autoInsertSpace: false }}
-        theme={{
-          token: {
-            colorPrimary: '#1F6B58',
-            colorInfo: '#1F6B58',
-            borderRadius: 8,
-          },
-        }}
-      >
+      <ConfigProvider locale={zhCN} button={{ autoInsertSpace: false }}>
         <BrowserRouter>
           <App />
         </BrowserRouter>
