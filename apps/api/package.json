@@ -3,8 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "tsx src/main.ts",
-    "start": "tsx src/main.ts",
+    "dev": "node --require ./register.js src/main.ts",
+    "start": "node --require ./register.js src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.ts",

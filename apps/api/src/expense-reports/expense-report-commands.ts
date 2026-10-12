@@ -253,6 +253,16 @@ export class ExpenseReportCommands {
   }
 
   async getVisible(actorId: string, reportId: string): Promise<ExpenseReportDetail> {
+    const owned = await this.prisma.expenseReport.findUnique({
+      where: { id: reportId },
+      select: { employeeId: true },
+    });
+    if (!owned) {
+      throw new ExpenseReportError('REPORT_NOT_FOUND', '报销单不存在');
+    }
+    if (owned.employeeId === actorId) {
+      return this.prisma.$transaction((tx) => loadReport(tx, reportId));
+    }
     const policies = await this.prisma.documentAccess.findMany({
       where: { documentId: reportId, revokedAt: null, action: 'read' },
     });
@@ -282,6 +292,11 @@ export class ExpenseReportCommands {
         const previous = await loadReport(tx, existing.documentId);
         if (previous.employeeId !== employeeId) {
           throw new ExpenseReportError('ACTOR_FORBIDDEN', '这个 Idempotency-Key 已经属于另一名员工');
+        }
+        const previousIds = previous.invoices.map((invoice) => invoice.id).sort().join(',');
+        const requestedIds = [...new Set(invoiceIds)].sort().join(',');
+        if (previousIds !== requestedIds) {
+          throw new ExpenseReportError('IDEMPOTENCY_PAYLOAD_MISMATCH', '这个提交编号已经用于另一组发票，请重新提交');
         }
         return previous;
       }

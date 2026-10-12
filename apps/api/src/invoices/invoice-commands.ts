@@ -109,7 +109,7 @@ export class InvoiceCommands {
       if (!winner || winner.ownerEmployeeId !== ownerEmployeeId) {
         throw new ExpenseReportError('INVOICE_ALREADY_BOUND', '这张发票影像已经在另一张有效报销单里');
       }
-      return toInvoiceView(winner);
+      return { ...toInvoiceView(winner), reused: true };
     }
   }
 

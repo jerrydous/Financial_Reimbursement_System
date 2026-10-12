@@ -30,8 +30,8 @@ describe('报销单状态机', () => {
 
   it('主管通过前可以撤回，财务审核开始后不能撤回', () => {
     expect(transitionExpenseReport('approving', 'withdraw')).toBe('withdrawn');
-    expect(() => transitionExpenseReport('finance_review', 'withdraw')).toThrow(/不能从 finance_review/);
-    expect(() => transitionExpenseReport('paid', 'finance_adjust')).toThrow(/不能从 paid/);
+    expect(() => transitionExpenseReport('finance_review', 'withdraw')).toThrow(/不能从财务审核执行撤回/);
+    expect(() => transitionExpenseReport('paid', 'finance_adjust')).toThrow(/不能从已支付执行修改批准金额/);
   });
 
   it('转交留在当前步骤，不增加审批层级', () => {
@@ -50,10 +50,10 @@ describe('报销单状态机', () => {
   it('财务才能改批准金额，支付成功后金额锁定', () => {
     const approved = applyFinanceAdjustment('finance_review', parseFen('100'), parseFen('80'));
     expect(approved).toBe(80n);
-    expect(() => applyFinanceAdjustment('paying', parseFen('80'), parseFen('70'))).toThrow(/不能从 paying/);
+    expect(() => applyFinanceAdjustment('paying', parseFen('80'), parseFen('70'))).toThrow(/不能从待支付/);
     expect(() =>
       actorForAction('paid', 'finance_adjust', { ownerId: 'owner', currentActorId: null }),
-    ).toThrow(/不能从 paid/);
+    ).toThrow(/不能从已支付/);
     expect(() => assertPaidAmountStable('paid', parseFen('80'), parseFen('70'))).toThrow(/支付成功后/);
     assertPaidAmountStable('finance_review', parseFen('100'), parseFen('80'));
   });
