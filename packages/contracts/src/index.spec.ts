@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ZodNumber, ZodString } from 'zod';
 import { buildOpenApiDocument } from './openapi';
-import { expenseReportItemSchema, fenStringSchema, pageOffset, pageQuerySchema } from './index';
+import { confirmInvoiceSchema, expenseReportItemSchema, fenStringSchema, pageOffset, pageQuerySchema } from './index';
 
 describe('金额契约', () => {
   it('报销金额字段是字符串，不是 number', () => {
@@ -17,6 +17,12 @@ describe('金额契约', () => {
     expect(pageQuerySchema.safeParse({ pageSize: '101' }).success).toBe(false);
     expect(pageOffset(1, 20)).toBe(0);
     expect(() => pageOffset(100, 20)).toThrow('PAGE_TOO_DEEP');
+  });
+
+  it('确认发票可以选币种，不填则是人民币', () => {
+    expect(confirmInvoiceSchema.parse({ invoiceCode: '', invoiceNumber: '1', amountFen: '100' }).currency).toBe('CNY');
+    expect(confirmInvoiceSchema.safeParse({ invoiceCode: '', invoiceNumber: '1', amountFen: '100', currency: 'USD' }).success).toBe(true);
+    expect(confirmInvoiceSchema.safeParse({ invoiceCode: '', invoiceNumber: '1', amountFen: '100', currency: 'BTC' }).success).toBe(false);
   });
 
   it('OpenAPI 从 Zod 生成，金额字段是 string', () => {

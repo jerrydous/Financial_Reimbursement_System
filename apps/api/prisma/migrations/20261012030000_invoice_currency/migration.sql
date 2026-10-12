@@ -1,0 +1,1 @@
+ALTER TABLE "invoices" ADD COLUMN "currency" TEXT NOT NULL DEFAULT 'CNY';

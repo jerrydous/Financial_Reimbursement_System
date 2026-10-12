@@ -67,7 +67,7 @@ export async function uploadInvoice(file: File): Promise<InvoiceView> {
 
 export async function confirmInvoice(
   id: string,
-  input: { invoiceCode: string; invoiceNumber: string; amountFen: string },
+  input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency: string },
 ): Promise<InvoiceView> {
   return read(
     await request(`/invoices/${id}/confirm`, {
@@ -80,6 +80,15 @@ export async function confirmInvoice(
 
 export async function invoiceContentUrl(id: string): Promise<{ url: string; expiresInSeconds: number }> {
   return read(await request(`/invoices/${id}/content-url`));
+}
+
+export async function fetchInvoiceContent(id: string): Promise<Blob> {
+  const response = await request(`/invoices/${id}/content`);
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { code?: string; message?: string } | null;
+    throw new ApiError(body?.code ?? `HTTP_${response.status}`, body?.message ?? '发票影像暂时读不出来，请稍后再试');
+  }
+  return response.blob();
 }
 
 export async function createExpenseReport(invoiceIds: string[], idempotencyKey: string): Promise<ExpenseReportDetail> {

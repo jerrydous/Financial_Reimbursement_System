@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
-import { pageOffset, type InvoiceList, type InvoiceView } from '@frs/contracts';
+import { currencyCodeSchema, pageOffset, type InvoiceList, type InvoiceView } from '@frs/contracts';
 import {
   ExpenseReportError,
   assertVerificationUnverified,
@@ -18,6 +18,7 @@ const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'application/pdf']);
 export interface InvoiceFileStore {
   putObject(input: { objectKey: string; body: Uint8Array; contentType: string }): Promise<void>;
   presignRead(objectKey: string): Promise<string>;
+  getObject(objectKey: string): Promise<{ body: Uint8Array; contentType: string }>;
 }
 
 @Injectable()
@@ -74,9 +75,13 @@ export class InvoiceCommands {
   async confirm(
     ownerEmployeeId: string,
     invoiceId: string,
-    input: { invoiceCode: string; invoiceNumber: string; amountFen: string },
+    input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency?: string },
   ): Promise<InvoiceView> {
     const amount = parseFen(input.amountFen);
+    const currency = currencyCodeSchema.safeParse(input.currency ?? 'CNY');
+    if (!currency.success) {
+      throw new ExpenseReportError('REQUEST_INVALID', '币种不受支持');
+    }
     assertVerificationUnverified('unverified');
     if (!input.invoiceNumber.trim()) {
       throw new ExpenseReportError('INVOICE_NUMBER_REQUIRED', '发票号码不能为空');
@@ -100,6 +105,7 @@ export class InvoiceCommands {
           invoiceCode: input.invoiceCode.trim(),
           invoiceNumber: input.invoiceNumber.trim(),
           amountFen: amount,
+          currency: currency.data,
           recognitionStatus: confirmRecognition(invoice.recognitionStatus as RecognitionStatus),
           verificationStatus: 'unverified',
         },
@@ -130,6 +136,31 @@ export class InvoiceCommands {
   }
 
   async presign(actorId: string, invoiceId: string): Promise<{ url: string; expiresInSeconds: number }> {
+    const invoice = await this.requireReadable(actorId, invoiceId);
+    return { url: await this.storage.presignRead(invoice.objectKey), expiresInSeconds: 60 };
+  }
+
+  async readContent(
+    actorId: string,
+    invoiceId: string,
+  ): Promise<{ body: Uint8Array; contentType: string; filename: string }> {
+    const invoice = await this.requireReadable(actorId, invoiceId);
+    let stored: { body: Uint8Array; contentType: string };
+    try {
+      stored = await this.storage.getObject(invoice.objectKey);
+    } catch {
+      logger.info({ documentId: invoiceId, actorId, workflowId: null, action: 'read_invoice_failed' });
+      throw new ExpenseReportError('FILE_UNAVAILABLE', '发票影像暂时读不出来，请稍后再试');
+    }
+    const filename = (invoice.invoiceNumber || invoice.id).replace(/[^\w.-]+/g, '_');
+    return {
+      body: stored.body,
+      contentType: invoice.contentType || stored.contentType || 'application/octet-stream',
+      filename,
+    };
+  }
+
+  private async requireReadable(actorId: string, invoiceId: string) {
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) {
       throw new ExpenseReportError('INVOICE_NOT_FOUND', '发票不存在');
@@ -149,7 +180,7 @@ export class InvoiceCommands {
         throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查看别人的发票影像');
       }
     }
-    return { url: await this.storage.presignRead(invoice.objectKey), expiresInSeconds: 60 };
+    return invoice;
   }
 }
 
@@ -158,16 +189,22 @@ function toInvoiceView(invoice: {
   invoiceCode: string;
   invoiceNumber: string;
   amountFen: bigint | null;
+  currency: string;
   recognitionStatus: string;
   verificationStatus: string;
   binding: string;
 }): InvoiceView {
   assertVerificationUnverified(invoice.verificationStatus);
+  const currency = currencyCodeSchema.safeParse(invoice.currency);
+  if (!currency.success) {
+    throw new ExpenseReportError('REQUEST_INVALID', '币种不受支持');
+  }
   return {
     id: invoice.id,
     invoiceCode: invoice.invoiceCode,
     invoiceNumber: invoice.invoiceNumber,
     amountFen: invoice.amountFen?.toString() ?? null,
+    currency: currency.data,
     recognitionStatus: invoice.recognitionStatus as InvoiceView['recognitionStatus'],
     verificationStatus: 'unverified',
     binding: invoice.binding as InvoiceView['binding'],

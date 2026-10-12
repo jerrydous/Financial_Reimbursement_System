@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { v7 as uuidv7 } from 'uuid';
 import type { ExpenseDecisionSignal } from '@frs/adapters';
 import { enforceDocumentPolicy } from '@frs/adapters';
-import type { ExpenseReportDetail } from '@frs/contracts';
+import { currencyCodeSchema, type ExpenseReportDetail } from '@frs/contracts';
 import {
   ExpenseReportError,
   actorForAction,
@@ -263,6 +263,10 @@ export class ExpenseReportCommands {
           ),
         );
       }
+      const currency = invoices[0]?.currency;
+      if (!currency || invoices.some((invoice) => invoice.currency !== currency) || !currencyCodeSchema.safeParse(currency).success) {
+        throw new ExpenseReportError('CURRENCY_MISMATCH', '同一张报销单里的发票必须使用同一种受支持的币种');
+      }
       const total = sumFen(amounts);
       assertReportMatchesLines(total, amounts);
       const reportId = uuidv7();
@@ -272,7 +276,7 @@ export class ExpenseReportCommands {
           employeeId,
           status: 'draft',
           amountFen: total,
-          currency: 'CNY',
+          currency,
           workflowId: expenseWorkflowId(reportId),
         },
       });

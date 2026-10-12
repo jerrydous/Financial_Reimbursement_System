@@ -28,6 +28,8 @@ export function createInvoiceObjectClient(options: InvoiceObjectClientOptions): 
       accessKeyId: options.accessKeyId,
       secretAccessKey: options.secretAccessKey,
     },
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
     requestHandler: new NodeHttpHandler({
       connectionTimeout: 2_000,
       requestTimeout: OBJECT_STORAGE_TIMEOUT_MS,
@@ -96,5 +98,20 @@ export class S3InvoiceStorage {
     return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }), {
       expiresIn: PRESIGN_SECONDS,
     });
+  }
+
+  async getObject(objectKey: string): Promise<{ body: Uint8Array; contentType: string }> {
+    const result = await callWithRetry(() =>
+      this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }), {
+        abortSignal: AbortSignal.timeout(OBJECT_STORAGE_TIMEOUT_MS),
+      }),
+    );
+    if (!result.Body) {
+      throw new Error('OBJECT_EMPTY');
+    }
+    return {
+      body: await result.Body.transformToByteArray(),
+      contentType: result.ContentType ?? 'application/octet-stream',
+    };
   }
 }

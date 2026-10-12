@@ -1,7 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Descriptions, Form, Input, Select, Space, Table, Typography } from 'antd';
-import { fenToYuanText, parseFen, yuanTextToFen } from '@frs/domain';
+import { Alert, Button, Descriptions, Form, Input, Modal, Select, Space, Table, Typography } from 'antd';
+import { yuanTextToFen } from '@frs/domain';
+import { currencyCodeSchema } from '@frs/contracts';
 import { useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -9,8 +10,8 @@ import { z } from 'zod';
 import {
   confirmInvoice,
   createExpenseReport,
+  fetchInvoiceContent,
   getExpenseReport,
-  invoiceContentUrl,
   listEmployees,
   listExpenseReports,
   listInvoices,
@@ -19,7 +20,7 @@ import {
   uploadInvoice,
   type ExpenseReportDetail,
 } from './api';
-import { actionLabel, formatTime, labelOf, reportNo, roleLabel, statusLabel, statusStillMoving } from './labels';
+import { actionLabel, currencyOptions, formatMoney, formatTime, labelOf, reportNo, roleLabel, statusLabel, statusStillMoving } from './labels';
 
 const yuanPattern = /^\d+\.\d{2}$/;
 
@@ -27,6 +28,7 @@ const confirmForm = z.object({
   invoiceCode: z.string(),
   invoiceNumber: z.string().min(1, '请填写发票号码'),
   yuan: z.string().regex(yuanPattern, '金额写成两位小数，例如 12.30'),
+  currency: currencyCodeSchema,
 });
 
 export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: boolean }) {
@@ -75,9 +77,8 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
           },
           { title: '状态', dataIndex: 'status', render: (status: string) => labelOf(statusLabel, status) },
           {
-            title: '金额（元）',
-            dataIndex: 'amountFen',
-            render: (amountFen: string) => fenToYuanText(parseFen(amountFen)),
+            title: '金额',
+            render: (_, row) => formatMoney(row.amountFen, row.currency),
           },
           { title: '创建时间', dataIndex: 'createdAt', render: (createdAt: string) => formatTime(createdAt) },
         ]}
@@ -102,7 +103,7 @@ export function NewReportPage() {
   const idempotencyKey = useMemo(() => crypto.randomUUID(), [selectionKey]);
   const form = useForm<z.infer<typeof confirmForm>>({
     resolver: zodResolver(confirmForm),
-    defaultValues: { invoiceCode: '', invoiceNumber: '', yuan: '' },
+    defaultValues: { invoiceCode: '', invoiceNumber: '', yuan: '', currency: 'CNY' },
   });
   const upload = useMutation({
     mutationFn: async (values: z.infer<typeof confirmForm>) => {
@@ -115,6 +116,7 @@ export function NewReportPage() {
         invoiceCode: values.invoiceCode,
         invoiceNumber: values.invoiceNumber,
         amountFen,
+        currency: values.currency,
       });
       await client.invalidateQueries({ queryKey: ['invoices'] });
       return stored;
@@ -131,12 +133,16 @@ export function NewReportPage() {
   });
   const errors = form.formState.errors;
   const invoiceRows = invoices.data?.items ?? [];
+  const selectedCurrencies = new Set(
+    selected.map((id) => invoiceRows.find((row) => row.id === id)?.currency).filter((currency) => currency !== undefined),
+  );
+  const mixedCurrency = selectedCurrencies.size > 1;
 
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Typography.Title level={4}>新建报销单</Typography.Title>
       <Typography.Paragraph type="secondary">
-        请对照影像自己填写发票代码、发票号码和价税合计。系统不会自动填写识别结果，验真状态保持为未验真。
+        请对照影像自己填写发票代码、发票号码、币种和价税合计。系统不会自动填写识别结果，验真状态保持为未验真。同一张报销单里的发票必须是同一种币种。
       </Typography.Paragraph>
       <Space direction="vertical" size={4}>
         <Typography.Text>发票影像</Typography.Text>
@@ -163,6 +169,8 @@ export function NewReportPage() {
           form.setValue('invoiceCode', String(data.get('invoiceCode') ?? ''));
           form.setValue('invoiceNumber', String(data.get('invoiceNumber') ?? ''));
           form.setValue('yuan', String(data.get('yuan') ?? ''));
+          const currency = currencyCodeSchema.safeParse(String(data.get('currency') ?? 'CNY'));
+          form.setValue('currency', currency.success ? currency.data : 'CNY');
           void form.handleSubmit(
             (values) => {
               if (!file) {
@@ -195,11 +203,23 @@ export function NewReportPage() {
             <Input id="invoiceNumber" {...form.register('invoiceNumber')} />
           </div>
         </Form.Item>
+        <Form.Item layout="vertical" label="币种" htmlFor="currency">
+          <div>
+            <input type="hidden" name="currency" value={form.watch('currency')} />
+            <Select
+              id="currency"
+              style={{ width: 220 }}
+              value={form.watch('currency')}
+              options={currencyOptions.map((option) => ({ value: option.value, label: option.label }))}
+              onChange={(value) => form.setValue('currency', value)}
+            />
+          </div>
+        </Form.Item>
         <Form.Item
           layout="vertical"
-          label="价税合计（元）"
+          label="价税合计"
           htmlFor="yuan"
-          extra="必须带两位小数，例如 12.30"
+          extra="按票面币种填写，保留两位小数，例如 12.30。不同币种不会互相折算。"
           validateStatus={errors.yuan ? 'error' : ''}
           help={errors.yuan?.message}
         >
@@ -234,9 +254,8 @@ export function NewReportPage() {
         columns={[
           { title: '发票号码', dataIndex: 'invoiceNumber', render: (number: string) => number || '待确认' },
           {
-            title: '金额（元）',
-            dataIndex: 'amountFen',
-            render: (amount: string | null) => (amount ? fenToYuanText(parseFen(amount)) : ''),
+            title: '金额',
+            render: (_, row) => (row.amountFen ? formatMoney(row.amountFen, row.currency) : ''),
           },
           {
             title: '状态',
@@ -245,7 +264,13 @@ export function NewReportPage() {
           { title: '验真', render: () => '未验真' },
         ]}
       />
-      <Button type="primary" disabled={selected.length === 0} loading={submit.isPending} onClick={() => void submit.mutateAsync()}>
+      {mixedCurrency ? <Alert type="warning" message="选中的发票币种不一致，不能放在同一张报销单里。" /> : null}
+      <Button
+        type="primary"
+        disabled={selected.length === 0 || mixedCurrency}
+        loading={submit.isPending}
+        onClick={() => void submit.mutateAsync()}
+      >
         提交报销单
       </Button>
       {submit.error instanceof Error ? <Alert type="error" message={submit.error.message} /> : null}
@@ -287,12 +312,13 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
       <Descriptions title={`报销单 ${reportNo(current.id)}`} bordered column={1} style={{ background: '#fff' }}>
         <Descriptions.Item label="完整单号">{current.id}</Descriptions.Item>
         <Descriptions.Item label="状态">{labelOf(statusLabel, current.status)}</Descriptions.Item>
-        <Descriptions.Item label="金额（元）">{fenToYuanText(parseFen(current.amountFen))}</Descriptions.Item>
-        <Descriptions.Item label="员工原始金额（元）">
-          {current.submittedAmountFen ? fenToYuanText(parseFen(current.submittedAmountFen)) : '尚未提交'}
+        <Descriptions.Item label="币种">{current.currency}</Descriptions.Item>
+        <Descriptions.Item label="金额">{formatMoney(current.amountFen, current.currency)}</Descriptions.Item>
+        <Descriptions.Item label="员工原始金额">
+          {current.submittedAmountFen ? formatMoney(current.submittedAmountFen, current.currency) : '尚未提交'}
         </Descriptions.Item>
-        <Descriptions.Item label="批准金额（元）">
-          {current.approvedAmountFen ? fenToYuanText(parseFen(current.approvedAmountFen)) : '尚未提交'}
+        <Descriptions.Item label="批准金额">
+          {current.approvedAmountFen ? formatMoney(current.approvedAmountFen, current.currency) : '尚未提交'}
         </Descriptions.Item>
         <Descriptions.Item label="创建时间">{formatTime(current.createdAt)}</Descriptions.Item>
       </Descriptions>
@@ -315,7 +341,7 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
               <div>
                 <Input
                   style={{ width: 180 }}
-                  placeholder="批准金额 0.00"
+                  placeholder={`批准金额（${current.currency}）`}
                   value={approvedYuan}
                   onChange={(event) => setApprovedYuan(event.target.value.trim())}
                 />
@@ -390,35 +416,76 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
 }
 
 function InvoiceTable({ report }: { report: ExpenseReportDetail }) {
+  const [preview, setPreview] = useState<{ url: string; type: string; name: string } | null>(null);
   const open = useMutation({
-    mutationFn: (invoiceId: string) => invoiceContentUrl(invoiceId),
-    onSuccess: (result) => {
-      window.open(result.url, '_blank', 'noopener');
+    mutationFn: async (row: ExpenseReportDetail['invoices'][number]) => {
+      const blob = await fetchInvoiceContent(row.id);
+      return {
+        url: URL.createObjectURL(blob),
+        type: blob.type || 'application/octet-stream',
+        name: row.invoiceNumber || '发票影像',
+      };
+    },
+    onSuccess: (next) => {
+      setPreview((current) => {
+        if (current) {
+          URL.revokeObjectURL(current.url);
+        }
+        return next;
+      });
     },
   });
+  function closePreview() {
+    setPreview((current) => {
+      if (current) {
+        URL.revokeObjectURL(current.url);
+      }
+      return null;
+    });
+  }
   return (
-    <Table
-      rowKey="id"
-      dataSource={report.invoices}
-      pagination={false}
-      columns={[
-        { title: '发票代码', dataIndex: 'invoiceCode', render: (code: string) => code || '—' },
-        { title: '发票号码', dataIndex: 'invoiceNumber' },
-        {
-          title: '金额（元）',
-          dataIndex: 'amountFen',
-          render: (amount: string | null) => (amount ? fenToYuanText(parseFen(amount)) : ''),
-        },
-        { title: '验真', render: () => '未验真' },
-        {
-          title: '影像',
-          render: (_, row) => (
-            <Button size="small" onClick={() => void open.mutateAsync(row.id)}>
-              查看影像
-            </Button>
-          ),
-        },
-      ]}
-    />
+    <>
+      {open.error instanceof Error ? <Alert type="error" message={open.error.message} /> : null}
+      <Table
+        rowKey="id"
+        dataSource={report.invoices}
+        pagination={false}
+        columns={[
+          { title: '发票代码', dataIndex: 'invoiceCode', render: (code: string) => code || '—' },
+          { title: '发票号码', dataIndex: 'invoiceNumber' },
+          {
+            title: '金额',
+            render: (_, row) => (row.amountFen ? formatMoney(row.amountFen, row.currency) : ''),
+          },
+          { title: '验真', render: () => '未验真' },
+          {
+            title: '影像',
+            render: (_, row) => (
+              <Button size="small" loading={open.isPending && open.variables?.id === row.id} onClick={() => void open.mutateAsync(row)}>
+                查看影像
+              </Button>
+            ),
+          },
+        ]}
+      />
+      {/* antd 5 的弹出动画在 React 19 上会停在透明，影像直接显示。 */}
+      <Modal
+        open={preview !== null}
+        title={preview ? `发票影像 ${preview.name}` : '发票影像'}
+        footer={null}
+        width={880}
+        transitionName=""
+        maskTransitionName=""
+        onCancel={closePreview}
+      >
+        {preview?.type.startsWith('image/') ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 360, background: '#f5f5f5' }}>
+            <img alt={preview.name} src={preview.url} style={{ display: 'block', maxWidth: '100%', maxHeight: 640 }} />
+          </div>
+        ) : preview ? (
+          <iframe title={preview.name} src={preview.url} style={{ width: '100%', height: 640, border: 0, background: '#f5f5f5' }} />
+        ) : null}
+      </Modal>
+    </>
   );
 }

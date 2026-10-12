@@ -46,6 +46,7 @@ describe.skipIf(!dockerAvailable())('P1 对私闭环在真实 PostgreSQL 上保�
     invoices = new InvoiceCommands(prisma as unknown as PrismaService, {
       putObject: async () => undefined,
       presignRead: async () => 'http://127.0.0.1/invoice',
+      getObject: async () => ({ body: new Uint8Array(), contentType: 'application/pdf' }),
     });
     await prisma.company.create({ data: { id: companyId, name: '示例公司', taxId: '91330100EXAMPLE001' } });
     await prisma.employee.create({

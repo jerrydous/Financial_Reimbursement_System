@@ -104,6 +104,7 @@ describe('报销列表只查当前员工', () => {
             id: '44444444-4444-4444-8444-444444444444',
             status: 'draft',
             amountFen: 1234n,
+            currency: 'CNY',
             createdAt: new Date('2026-10-09T00:00:00.000Z'),
           },
         ]),
@@ -117,5 +118,6 @@ describe('报销列表只查当前员工', () => {
     );
     expect(list.items[0]?.amountFen).toBe('1234');
     expect(typeof list.items[0]?.amountFen).toBe('string');
+    expect(list.items[0]?.currency).toBe('CNY');
   });
 });

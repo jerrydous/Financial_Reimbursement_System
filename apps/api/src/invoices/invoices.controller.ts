@@ -7,6 +7,7 @@ import {
   Post,
   Query,
   Req,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -68,6 +69,20 @@ export class InvoicesController {
     const employee = await this.employees.getOwn(request.claims);
     try {
       return await this.invoices.confirm(employee.id, id, parsed.data);
+    } catch (error) {
+      rethrowAsHttp(error);
+    }
+  }
+
+  @Get('invoices/:id/content')
+  async file(@Req() request: AuthenticatedRequest, @Param('id') id: string): Promise<StreamableFile> {
+    const employee = await this.employees.getOwn(request.claims);
+    try {
+      const stored = await this.invoices.readContent(employee.id, id);
+      return new StreamableFile(stored.body, {
+        type: stored.contentType,
+        disposition: `inline; filename="${stored.filename}"`,
+      });
     } catch (error) {
       rethrowAsHttp(error);
     }

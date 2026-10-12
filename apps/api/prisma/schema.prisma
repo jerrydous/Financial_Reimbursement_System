@@ -73,6 +73,7 @@ model Invoice {
   invoiceCode         String        @default("") @map("invoice_code")
   invoiceNumber       String        @default("") @map("invoice_number")
   amountFen           BigInt?       @map("amount_fen")
+  currency            String        @default("CNY")
   recognitionStatus   String        @default("pending_confirmation") @map("recognition_status")
   verificationStatus  String        @default("unverified") @map("verification_status")
   binding             String        @default("released")
