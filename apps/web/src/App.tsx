@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { Button, Descriptions, Layout, Menu, Space, Spin, Typography } from 'antd';
+import { Alert, Button, Descriptions, Form, Input, Layout, Menu, Modal, Space, Spin, Typography } from 'antd';
+import { useState } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { getMe, type EmployeeView } from './api';
-import { keycloak, useSession } from './auth';
+import { loginWithPassword, signOut, useSession } from './auth';
 import { BrandMark } from './brand';
 import { labelOf, roleLabel } from './labels';
 import { NewReportPage, ReportDetailPage, ReportListPage } from './report-pages';
@@ -17,6 +18,7 @@ export function App() {
     enabled: session.authenticated,
     queryFn: getMe,
   });
+  const [loginOpen, setLoginOpen] = useState(false);
   const selected = location.pathname.startsWith('/expense-reports')
     ? '/expense-reports'
     : location.pathname.startsWith('/approvals')
@@ -48,10 +50,10 @@ export function App() {
           ) : null}
           {session.phase === 'loading' ? <Typography.Text style={{ color: '#fff' }}>正在连接登录…</Typography.Text> : null}
           {session.phase === 'ready' && session.authenticated ? (
-            <Button onClick={() => void keycloak.logout()}>退出</Button>
+            <Button onClick={() => void signOut()}>退出</Button>
           ) : null}
           {session.phase === 'ready' && !session.authenticated ? (
-            <Button type="primary" onClick={() => void keycloak.login()}>
+            <Button type="primary" onClick={() => setLoginOpen(true)}>
               登录
             </Button>
           ) : null}
@@ -81,7 +83,16 @@ export function App() {
                 <Typography.Paragraph type="danger">无法读取当前员工身份</Typography.Paragraph>
               ) : null}
               <Routes>
-                <Route path="/" element={<IdentityPage authenticated={session.authenticated} employee={me.data ?? null} />} />
+                <Route
+                  path="/"
+                  element={
+                    <IdentityPage
+                      authenticated={session.authenticated}
+                      employee={me.data ?? null}
+                      onLogin={() => setLoginOpen(true)}
+                    />
+                  }
+                />
                 <Route path="/expense-reports" element={<ReportListPage enabled={session.authenticated} inbox={false} />} />
                 <Route path="/expense-reports/new" element={<NewReportPage />} />
                 <Route path="/expense-reports/:id" element={<ReportDetailPage actorId={me.data?.id} />} />
@@ -91,13 +102,80 @@ export function App() {
           )}
         </Content>
       </Layout>
+      <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} />
     </Layout>
   );
 }
 
-function IdentityPage({ authenticated, employee }: { authenticated: boolean; employee: EmployeeView | null }) {
+function LoginDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState(false);
+  return (
+    <Modal
+      open={open}
+      title="登录"
+      footer={null}
+      width={420}
+      destroyOnHidden
+      transitionName=""
+      maskTransitionName=""
+      onCancel={() => {
+        if (!pending) {
+          setError('');
+          onClose();
+        }
+      }}
+    >
+      <Form
+        layout="vertical"
+        requiredMark={false}
+        onFinish={(values: { username: string; password: string }) => {
+          setPending(true);
+          setError('');
+          void loginWithPassword(values.username.trim(), values.password)
+            .then(() => {
+              setError('');
+              onClose();
+            })
+            .catch((reason: unknown) => {
+              setError(reason instanceof Error ? reason.message : '登录没有成功，请稍后再试');
+            })
+            .finally(() => setPending(false));
+        }}
+      >
+        <Form.Item label="账号" name="username" rules={[{ required: true, message: '请填写账号' }]}>
+          <Input autoFocus autoComplete="username" />
+        </Form.Item>
+        <Form.Item label="密码" name="password" rules={[{ required: true, message: '请填写密码' }]}>
+          <Input.Password autoComplete="current-password" />
+        </Form.Item>
+        {error ? <Alert type="error" message={error} style={{ marginBottom: 16 }} /> : null}
+        <Button type="primary" htmlType="submit" block loading={pending}>
+          登录
+        </Button>
+      </Form>
+    </Modal>
+  );
+}
+
+function IdentityPage({
+  authenticated,
+  employee,
+  onLogin,
+}: {
+  authenticated: boolean;
+  employee: EmployeeView | null;
+  onLogin: () => void;
+}) {
   if (!authenticated) {
-    return <Typography.Paragraph>请使用右上角的登录。登录后只能看到自己的员工身份和公司抬头。</Typography.Paragraph>;
+    return (
+      <Space direction="vertical">
+        <Typography.Paragraph style={{ marginBottom: 0 }}>请登录后查看自己的员工身份和公司抬头。</Typography.Paragraph>
+        <Button type="primary" onClick={onLogin}>
+          登录
+        </Button>
+      </Space>
+    );
   }
   if (!employee) {
     return <Typography.Paragraph>正在读取身份…</Typography.Paragraph>;
