@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Descriptions, Form, Input, Modal, Select, Space, Table, Typography } from 'antd';
+import { Alert, Button, Descriptions, Form, Input, Select, Space, Table, Typography } from 'antd';
 import { yuanTextToFen } from '@frs/domain';
 import { currencyCodeSchema, expenseCategorySchema } from '@frs/contracts';
 import { useMemo, useRef, useState } from 'react';
@@ -20,6 +20,7 @@ import {
   uploadInvoice,
   type ExpenseReportDetail,
 } from './api';
+import { InvoicePreviewDialog, LocalInvoicePreview, useInvoicePreview } from './invoice-preview';
 import { actionLabel, categoryLabel, categoryOptions, currencyOptions, formatMoney, formatTime, labelOf, reportNo, roleLabel, statusLabel, statusStillMoving } from './labels';
 
 const yuanPattern = /^\d+\.\d{2}$/;
@@ -107,6 +108,7 @@ export function NewReportPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
+  const storedPreview = useInvoicePreview();
   const fileInput = useRef<HTMLInputElement>(null);
   const selectionKey = selected.slice().sort().join(',');
   const idempotencyKey = useMemo(() => crypto.randomUUID(), [selectionKey]);
@@ -172,6 +174,7 @@ export function NewReportPage() {
           }}
         />
         {fileError ? <Typography.Text type="danger">{fileError}</Typography.Text> : null}
+        <LocalInvoicePreview file={file} />
       </Space>
       <form
         onSubmit={(event) => {
@@ -316,8 +319,21 @@ export function NewReportPage() {
             render: (_, row) => (row.recognitionStatus === 'confirmed' && row.binding === 'released' ? '可报销' : row.binding === 'active' ? '已占用' : '待确认'),
           },
           { title: '验真', render: () => '未验真' },
+          {
+            title: '影像',
+            render: (_, row) => (
+              <Button
+                size="small"
+                loading={storedPreview.busyKey === row.id}
+                onClick={() => void storedPreview.open(row.invoiceNumber || '发票影像', () => fetchInvoiceContent(row.id), row.id)}
+              >
+                查看影像
+              </Button>
+            ),
+          },
         ]}
       />
+      <InvoicePreviewDialog preview={storedPreview.preview} onClose={storedPreview.close} />
       {mixedCurrency ? <Alert type="warning" message="选中的发票币种不一致，不能放在同一张报销单里。" /> : null}
       <Button
         type="primary"
@@ -485,36 +501,9 @@ function auditAmount(
 }
 
 function InvoiceTable({ report }: { report: ExpenseReportDetail }) {
-  const [preview, setPreview] = useState<{ url: string; type: string; name: string } | null>(null);
-  const open = useMutation({
-    mutationFn: async (row: ExpenseReportDetail['invoices'][number]) => {
-      const blob = await fetchInvoiceContent(row.id);
-      return {
-        url: URL.createObjectURL(blob),
-        type: blob.type || 'application/octet-stream',
-        name: row.invoiceNumber || '发票影像',
-      };
-    },
-    onSuccess: (next) => {
-      setPreview((current) => {
-        if (current) {
-          URL.revokeObjectURL(current.url);
-        }
-        return next;
-      });
-    },
-  });
-  function closePreview() {
-    setPreview((current) => {
-      if (current) {
-        URL.revokeObjectURL(current.url);
-      }
-      return null;
-    });
-  }
+  const preview = useInvoicePreview();
   return (
     <>
-      {open.error instanceof Error ? <Alert type="error" message={open.error.message} /> : null}
       <Table
         rowKey="id"
         dataSource={report.invoices}
@@ -540,31 +529,18 @@ function InvoiceTable({ report }: { report: ExpenseReportDetail }) {
           {
             title: '影像',
             render: (_, row) => (
-              <Button size="small" loading={open.isPending && open.variables?.id === row.id} onClick={() => void open.mutateAsync(row)}>
+              <Button
+                size="small"
+                loading={preview.busyKey === row.id}
+                onClick={() => void preview.open(row.invoiceNumber || '发票影像', () => fetchInvoiceContent(row.id), row.id)}
+              >
                 查看影像
               </Button>
             ),
           },
         ]}
       />
-      {/* antd 5 的弹出动画在 React 19 上会停在透明，影像直接显示。 */}
-      <Modal
-        open={preview !== null}
-        title={preview ? `发票影像 ${preview.name}` : '发票影像'}
-        footer={null}
-        width={880}
-        transitionName=""
-        maskTransitionName=""
-        onCancel={closePreview}
-      >
-        {preview?.type.startsWith('image/') ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 360, background: '#f5f5f5' }}>
-            <img alt={preview.name} src={preview.url} style={{ display: 'block', maxWidth: '100%', maxHeight: 640 }} />
-          </div>
-        ) : preview ? (
-          <iframe title={preview.name} src={preview.url} style={{ width: '100%', height: 640, border: 0, background: '#f5f5f5' }} />
-        ) : null}
-      </Modal>
+      <InvoicePreviewDialog preview={preview.preview} onClose={preview.close} />
     </>
   );
 }
