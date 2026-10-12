@@ -31,7 +31,8 @@ export class InvoiceCommands {
   ) {}
 
   async upload(ownerEmployeeId: string, file: { body: Buffer; contentType: string }): Promise<InvoiceView> {
-    if (!ALLOWED_TYPES.has(file.contentType)) {
+    const contentType = recognizeInvoiceType(file.body, file.contentType);
+    if (!contentType) {
       throw new ExpenseReportError('FILE_TYPE_UNSUPPORTED', '只接受 jpg、png 或 pdf');
     }
     const fileSha256 = createHash('sha256').update(file.body).digest('hex');
@@ -44,7 +45,7 @@ export class InvoiceCommands {
     }
     const id = uuidv7();
     const objectKey = `invoices/default/${id}`;
-    await this.storage.putObject({ objectKey, body: file.body, contentType: file.contentType });
+    await this.storage.putObject({ objectKey, body: file.body, contentType });
     try {
       const created = await this.prisma.invoice.create({
         data: {
@@ -52,7 +53,7 @@ export class InvoiceCommands {
           ownerEmployeeId,
           objectKey,
           fileSha256,
-          contentType: file.contentType,
+          contentType,
           recognitionStatus: 'pending_confirmation',
           verificationStatus: 'unverified',
           binding: 'released',
@@ -243,4 +244,18 @@ function toInvoiceView(invoice: {
     verificationStatus: 'unverified',
     binding: invoice.binding as InvoiceView['binding'],
   };
+}
+
+function recognizeInvoiceType(body: Buffer, declared: string): string | null {
+  const head = body.subarray(0, Math.min(body.length, 1024));
+  if (head.includes(Buffer.from('%PDF-'))) {
+    return 'application/pdf';
+  }
+  if (body.length >= 8 && body[0] === 0x89 && body[1] === 0x50 && body[2] === 0x4e && body[3] === 0x47) {
+    return 'image/png';
+  }
+  if (body.length >= 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  return ALLOWED_TYPES.has(declared) ? declared : null;
 }

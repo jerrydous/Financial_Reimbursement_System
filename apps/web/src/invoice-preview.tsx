@@ -1,5 +1,9 @@
 import { Alert, Modal, Spin, Typography } from 'antd';
+import { getDocument, GlobalWorkerOptions, PasswordException } from 'pdfjs-dist';
+import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useEffect, useRef, useState } from 'react';
+
+GlobalWorkerOptions.workerSrc = workerSrc;
 
 export type InvoicePreviewState =
   | null
@@ -191,9 +195,91 @@ function InvoiceMedia({ url, type, name }: { url: string; type: string; name: st
       </div>
     );
   }
+  return <PdfPages url={url} />;
+}
+
+function PdfPages({ url }: { url: string }) {
+  const host = useRef<HTMLDivElement>(null);
+  const [message, setMessage] = useState('正在打开 PDF…');
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    let destroyTask: (() => void) | null = null;
+    void (async () => {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('影像文件没有读到');
+      }
+      const data = new Uint8Array(await response.arrayBuffer());
+      if (cancelled) {
+        return;
+      }
+      const task = getDocument({
+        data,
+        cMapUrl: '/pdfjs/cmaps/',
+        cMapPacked: true,
+        standardFontDataUrl: '/pdfjs/standard_fonts/',
+      });
+      destroyTask = () => {
+        void task.destroy();
+      };
+      const pdf = await task.promise;
+      if (cancelled || !host.current) {
+        return;
+      }
+      host.current.replaceChildren();
+      const shown = Math.min(pdf.numPages, 8);
+      for (let index = 1; index <= shown; index += 1) {
+        const page = await pdf.getPage(index);
+        if (cancelled || !host.current) {
+          return;
+        }
+        const unscaled = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(1.5, 800 / unscaled.width) });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        canvas.style.display = 'block';
+        canvas.style.width = '100%';
+        canvas.style.height = 'auto';
+        canvas.style.marginBottom = '12px';
+        canvas.style.background = '#fff';
+        const context = canvas.getContext('2d');
+        if (!context) {
+          throw new Error('浏览器不能绘制这一页');
+        }
+        host.current.appendChild(canvas);
+        await page.render({ canvas, viewport }).promise;
+      }
+      if (!cancelled) {
+        setFailed(false);
+        setMessage(pdf.numPages > shown ? `共 ${pdf.numPages} 页，这里显示前 ${shown} 页` : `共 ${pdf.numPages} 页`);
+      }
+    })().catch((error: unknown) => {
+      if (cancelled) {
+        return;
+      }
+      setFailed(true);
+      setMessage(pdfErrorText(error));
+    });
+    return () => {
+      cancelled = true;
+      destroyTask?.();
+    };
+  }, [url]);
   return (
-    <iframe title={name} src={url} style={{ width: '100%', height: 640, border: 0, background: '#525659' }} />
+    <div>
+      {failed ? <Alert type="error" message={message} /> : <Typography.Text type="secondary">{message}</Typography.Text>}
+      <div ref={host} style={{ marginTop: 8, maxHeight: 640, overflow: 'auto', background: '#525659', padding: 12 }} />
+    </div>
   );
+}
+
+function pdfErrorText(error: unknown): string {
+  if (error instanceof PasswordException) {
+    return '这份 PDF 有打开密码，这里打不开。';
+  }
+  return '这份 PDF 没有打开。请确认文件本身能用阅读器打开。';
 }
 
 function displayScale(width: number, height: number): number {

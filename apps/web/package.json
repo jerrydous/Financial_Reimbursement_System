@@ -18,9 +18,10 @@
     "@vitejs/plugin-react": "^4.5.2",
     "antd": "^5.26.2",
     "keycloak-js": "^26.2.0",
-    "react-hook-form": "^7.63.0",
+    "pdfjs-dist": "^6.4.299",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-hook-form": "^7.63.0",
     "react-router-dom": "^7.6.2",
     "vite": "^6.3.5",
     "zod": "^3.25.67"
