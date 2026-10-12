@@ -48,3 +48,25 @@ export async function applyExpenseDecision(input: ExpenseDecisionInput): Promise
   const body = (await response.json()) as { status?: string };
   return { status: body.status ?? '' };
 }
+
+export async function remindExpenseApprover(input: { reportId: string }): Promise<void> {
+  await postInternal(`/internal/expense-reports/${input.reportId}/reminders`, {});
+}
+
+export async function remindDocument(input: { documentId: string; kind: string }): Promise<void> {
+  await postInternal('/internal/reminders', input);
+}
+
+async function postInternal(path: string, body: unknown): Promise<void> {
+  const baseUrl = process.env.API_INTERNAL_URL ?? 'http://127.0.0.1:3000';
+  const token = process.env.INTERNAL_TOKEN ?? '';
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-internal-token': token },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok && response.status >= 500) {
+    throw ApplicationFailure.create({ message: await response.text(), nonRetryable: false });
+  }
+}

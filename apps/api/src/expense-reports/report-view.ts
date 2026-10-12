@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
-import { expenseReportDetailSchema, type ExpenseReportDetail } from '@frs/contracts';
+import { currencyCodeSchema, expenseReportDetailSchema, type ExpenseReportDetail } from '@frs/contracts';
 import {
-  assertVerificationUnverified,
+  assertVerificationStatus,
   ExpenseReportError,
   expenseReportStatuses,
   type ExpenseReportStatus,
@@ -12,6 +12,7 @@ export type ReportTx = Prisma.TransactionClient;
 const reportInclude = {
   lines: { include: { invoice: true } },
   auditEvents: { orderBy: { createdAt: 'asc' as const } },
+  warnings: { orderBy: { createdAt: 'asc' as const } },
 } satisfies Prisma.ExpenseReportInclude;
 
 export async function loadReport(tx: ReportTx, reportId: string): Promise<ExpenseReportDetail> {
@@ -23,7 +24,9 @@ export async function loadReport(tx: ReportTx, reportId: string): Promise<Expens
     throw new ExpenseReportError('REPORT_NOT_FOUND', '报销单不存在');
   }
   const actorIds = [...new Set(report.auditEvents.map((event) => event.actorId))].filter((actorId) => actorId !== 'system');
-  const actors = actorIds.length === 0 ? [] : await tx.employee.findMany({ where: { id: { in: actorIds } } });
+  const actors = actorIds.length
+    ? await tx.employee.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
+    : [];
   const actorNames = new Map(actors.map((actor) => [actor.id, actor.name]));
   return expenseReportDetailSchema.parse({
     id: report.id,
@@ -36,27 +39,39 @@ export async function loadReport(tx: ReportTx, reportId: string): Promise<Expens
     version: report.version,
     currentStep: report.currentStep,
     currentActorId: report.currentActorId,
+    approvalMode: report.approvalMode,
+    subsidyFen: report.subsidyFen.toString(),
     createdAt: report.createdAt.toISOString(),
     invoices: report.lines.map((line) => {
-      assertVerificationUnverified(line.invoice.verificationStatus);
+      const verificationStatus = assertVerificationStatus(line.invoice.verificationStatus);
       return {
         id: line.invoice.id,
         invoiceCode: line.invoice.invoiceCode,
         invoiceNumber: line.invoice.invoiceNumber,
         amountFen: line.invoice.amountFen?.toString() ?? null,
+        currency: currencyCodeSchema.parse(line.invoice.currency),
+        sellerName: line.invoice.sellerName,
+        invoiceDate: line.invoice.invoiceDate,
+        ledgerStatus: line.invoice.ledgerStatus,
+        ocrStatus: line.invoice.ocrStatus,
+        ocrMessage: line.invoice.ocrMessage,
         recognitionStatus: line.invoice.recognitionStatus,
-        verificationStatus: line.invoice.verificationStatus,
+        verificationStatus,
+        buyerName: line.invoice.buyerName,
+        buyerTaxId: line.invoice.buyerTaxId,
+        invoiceType: line.invoice.invoiceType,
         binding: line.invoice.binding,
       };
     }),
     audits: report.auditEvents.map((event) => ({
       action: event.action,
       actorId: event.actorId,
-      actorName: event.actorId === 'system' ? '系统' : (actorNames.get(event.actorId) ?? '未知员工'),
+      actorName: event.actorId === 'system' ? '系统' : (actorNames.get(event.actorId) ?? '未知'),
       fromStatus: event.fromStatus,
       toStatus: event.toStatus,
       createdAt: event.createdAt.toISOString(),
     })),
+    warnings: report.warnings.map((warning) => ({ code: warning.code, message: warning.message })),
   });
 }
 

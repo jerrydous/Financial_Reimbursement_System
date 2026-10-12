@@ -30,8 +30,19 @@ model Employee {
   managerId       String?         @map("manager_id")
   manager         Employee?       @relation("EmployeeManager", fields: [managerId], references: [id])
   directReports   Employee[]      @relation("EmployeeManager")
+  departmentId    String?         @map("department_id")
+  department      Department?     @relation(fields: [departmentId], references: [id])
+  rankId          String?         @map("rank_id")
+  rank            Rank?           @relation(fields: [rankId], references: [id])
   expenseReports  ExpenseReport[]
   invoices        Invoice[]
+  applications    Application[]
+  loans           Loan[]
+  proxiesGranted  ApprovalProxy[] @relation("ProxyPrincipal")
+  proxiesHeld     ApprovalProxy[] @relation("ProxyAgent")
+  contracts       Contract[]
+  corporateBills  CorporateBill[]
+  travelOrders    TravelOrder[]
 
   @@map("employees")
 }
@@ -50,6 +61,12 @@ model ExpenseReport {
   currentActorId      String?            @map("current_actor_id")
   workflowId          String?            @map("workflow_id")
   version             Int                @default(1)
+  approvalMode        String             @default("single") @map("approval_mode")
+  applicationId       String?            @map("application_id")
+  application         Application?       @relation(fields: [applicationId], references: [id])
+  budgetLineId        String?            @map("budget_line_id")
+  budgetLine          BudgetLine?        @relation(fields: [budgetLineId], references: [id])
+  subsidyFen          BigInt             @default(0) @map("subsidy_fen")
   createdAt           DateTime           @default(now()) @map("created_at")
   lines               ExpenseLine[]
   payments            Payment[]
@@ -57,6 +74,12 @@ model ExpenseReport {
   auditEvents         AuditEvent[]
   accesses            DocumentAccess[]
   invoices            Invoice[]
+  warnings            ControlWarning[]
+  votes               ApprovalVote[]
+  assignments         ApprovalAssignment[]
+  allocations         AllocationLine[]
+  writeOffs           LoanWriteOff[]
+  holds               BudgetHold[]
 
   @@index([employeeId, createdAt])
   @@map("expense_reports")
@@ -73,6 +96,17 @@ model Invoice {
   invoiceCode         String        @default("") @map("invoice_code")
   invoiceNumber       String        @default("") @map("invoice_number")
   amountFen           BigInt?       @map("amount_fen")
+  currency            String        @default("CNY")
+  sellerName          String        @default("") @map("seller_name")
+  invoiceDate         String        @default("") @map("invoice_date")
+  buyerName           String        @default("") @map("buyer_name")
+  buyerTaxId          String        @default("") @map("buyer_tax_id")
+  invoiceType         String        @default("") @map("invoice_type")
+  ledgerStatus        String        @default("open") @map("ledger_status")
+  transferredToId     String?       @map("transferred_to_employee_id")
+  ocrStatus           String        @default("skipped") @map("ocr_status")
+  ocrMessage          String        @default("") @map("ocr_message")
+  ocrRequestId        String        @default("") @map("ocr_request_id")
   recognitionStatus   String        @default("pending_confirmation") @map("recognition_status")
   verificationStatus  String        @default("unverified") @map("verification_status")
   binding             String        @default("released")
@@ -80,6 +114,7 @@ model Invoice {
   expenseReport       ExpenseReport? @relation(fields: [expenseReportId], references: [id])
   createdAt           DateTime      @default(now()) @map("created_at")
   lines               ExpenseLine[]
+  verifications       InvoiceVerificationAttempt[]
 
   @@index([ownerEmployeeId, createdAt])
   @@map("invoices")
@@ -166,4 +201,387 @@ model DocumentAccess {
   @@index([actorId, action, revokedAt])
   @@index([documentId])
   @@map("document_access")
+}
+
+model Department {
+  id        String       @id
+  tenantId  String       @default("default") @map("tenant_id")
+  name      String
+  enabled   Boolean      @default(true)
+  employees Employee[]
+  budgets   BudgetLine[]
+
+  @@map("departments")
+}
+
+model Rank {
+  id        String        @id
+  tenantId  String        @default("default") @map("tenant_id")
+  name      String
+  level     Int
+  employees Employee[]
+  subsidies SubsidyRate[]
+
+  @@map("ranks")
+}
+
+model Project {
+  id       String       @id
+  tenantId String       @default("default") @map("tenant_id")
+  name     String
+  code     String
+  enabled  Boolean      @default(true)
+  budgets  BudgetLine[]
+
+  @@map("projects")
+}
+
+model BudgetSubject {
+  id       String       @id
+  tenantId String       @default("default") @map("tenant_id")
+  name     String
+  code     String
+  budgets  BudgetLine[]
+
+  @@map("budget_subjects")
+}
+
+model CostCenter {
+  id          String           @id
+  tenantId    String           @default("default") @map("tenant_id")
+  name        String
+  code        String
+  enabled     Boolean          @default(true)
+  allocations AllocationLine[]
+
+  @@map("cost_centers")
+}
+
+model ExpenseType {
+  id       String  @id
+  tenantId String  @default("default") @map("tenant_id")
+  name     String
+  code     String
+  enabled  Boolean @default(true)
+
+  @@map("expense_types")
+}
+
+model Vendor {
+  id        String          @id
+  tenantId  String          @default("default") @map("tenant_id")
+  name      String
+  taxId     String          @map("tax_id")
+  enabled   Boolean         @default(true)
+  contracts Contract[]
+  bills     CorporateBill[]
+
+  @@map("vendors")
+}
+
+model Application {
+  id          String          @id
+  tenantId    String          @default("default") @map("tenant_id")
+  employeeId  String          @map("employee_id")
+  employee    Employee        @relation(fields: [employeeId], references: [id])
+  purpose     String
+  amountFen   BigInt          @map("amount_fen")
+  consumedFen BigInt          @default(0) @map("consumed_fen")
+  status      String
+  version     Int             @default(1)
+  currency    String          @default("CNY")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  reports     ExpenseReport[]
+
+  @@index([employeeId, createdAt])
+  @@map("applications")
+}
+
+model PolicyVersion {
+  id                   String    @id
+  tenantId             String    @default("default") @map("tenant_id")
+  name                 String
+  version              Int
+  status               String
+  rulesJson            Json      @map("rules_json")
+  skipManagerBelowFen  BigInt?   @map("skip_manager_below_fen")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  @@unique([tenantId, name, version])
+  @@map("policy_versions")
+}
+
+model SubsidyRate {
+  id       String @id
+  tenantId String @default("default") @map("tenant_id")
+  city     String
+  rankId   String @map("rank_id")
+  rank     Rank   @relation(fields: [rankId], references: [id])
+  dailyFen BigInt @map("daily_fen")
+  enabled  Boolean @default(true)
+
+  @@unique([tenantId, city, rankId])
+  @@map("subsidy_rates")
+}
+
+model Loan {
+  id          String         @id
+  tenantId    String         @default("default") @map("tenant_id")
+  employeeId  String         @map("employee_id")
+  employee    Employee       @relation(fields: [employeeId], references: [id])
+  amountFen   BigInt         @map("amount_fen")
+  balanceFen  BigInt         @map("balance_fen")
+  status      String
+  dueOn       String         @map("due_on")
+  version     Int            @default(1)
+  currency    String         @default("CNY")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  writeOffs   LoanWriteOff[]
+  repayments  Repayment[]
+
+  @@index([employeeId, createdAt])
+  @@map("loans")
+}
+
+model LoanWriteOff {
+  id         String        @id
+  loanId     String        @map("loan_id")
+  loan       Loan          @relation(fields: [loanId], references: [id])
+  reportId   String        @map("report_id")
+  report     ExpenseReport @relation(fields: [reportId], references: [id])
+  amountFen  BigInt        @map("amount_fen")
+  status     String
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@index([reportId])
+  @@map("loan_write_offs")
+}
+
+model Repayment {
+  id             String   @id
+  tenantId       String   @default("default") @map("tenant_id")
+  loanId         String   @map("loan_id")
+  loan           Loan     @relation(fields: [loanId], references: [id])
+  employeeId     String   @map("employee_id")
+  amountFen      BigInt   @map("amount_fen")
+  idempotencyKey String   @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, idempotencyKey])
+  @@map("repayments")
+}
+
+model ApprovalAssignment {
+  id       String        @id
+  reportId String        @map("report_id")
+  report   ExpenseReport @relation(fields: [reportId], references: [id])
+  actorId  String        @map("actor_id")
+
+  @@unique([reportId, actorId])
+  @@map("approval_assignments")
+}
+
+model ApprovalVote {
+  id         String        @id
+  reportId   String        @map("report_id")
+  report     ExpenseReport @relation(fields: [reportId], references: [id])
+  actorId    String        @map("actor_id")
+  decision   String
+  decidedAt  DateTime?     @map("decided_at")
+
+  @@unique([reportId, actorId])
+  @@map("approval_votes")
+}
+
+model ApprovalProxy {
+  id          String   @id
+  tenantId    String   @default("default") @map("tenant_id")
+  principalId String   @map("principal_id")
+  principal   Employee @relation("ProxyPrincipal", fields: [principalId], references: [id])
+  agentId     String   @map("agent_id")
+  agent       Employee @relation("ProxyAgent", fields: [agentId], references: [id])
+  startsOn    String   @map("starts_on")
+  endsOn      String   @map("ends_on")
+  enabled     Boolean  @default(true)
+
+  @@map("approval_proxies")
+}
+
+model BudgetLine {
+  id           String         @id
+  tenantId     String         @default("default") @map("tenant_id")
+  departmentId String         @map("department_id")
+  department   Department     @relation(fields: [departmentId], references: [id])
+  projectId    String         @map("project_id")
+  project      Project        @relation(fields: [projectId], references: [id])
+  subjectId    String         @map("subject_id")
+  subject      BudgetSubject  @relation(fields: [subjectId], references: [id])
+  period       String
+  amountFen    BigInt         @map("amount_fen")
+  reservedFen  BigInt         @default(0) @map("reserved_fen")
+  consumedFen  BigInt         @default(0) @map("consumed_fen")
+  version      Int            @default(1)
+  reports      ExpenseReport[]
+  holds        BudgetHold[]
+
+  @@unique([tenantId, departmentId, projectId, subjectId, period])
+  @@map("budget_lines")
+}
+
+model BudgetHold {
+  id              String         @id
+  budgetLineId    String         @map("budget_line_id")
+  line            BudgetLine     @relation(fields: [budgetLineId], references: [id])
+  reportId        String?        @map("report_id")
+  report          ExpenseReport? @relation(fields: [reportId], references: [id])
+  corporateBillId String?        @map("corporate_bill_id")
+  corporateBill   CorporateBill? @relation(fields: [corporateBillId], references: [id])
+  amountFen       BigInt         @map("amount_fen")
+  status          String
+
+  @@index([reportId])
+  @@map("budget_holds")
+}
+
+model AllocationLine {
+  id           String        @id
+  reportId     String        @map("report_id")
+  report       ExpenseReport @relation(fields: [reportId], references: [id])
+  departmentId String        @map("department_id")
+  projectId    String        @map("project_id")
+  costCenterId String        @map("cost_center_id")
+  costCenter   CostCenter    @relation(fields: [costCenterId], references: [id])
+  amountFen    BigInt        @map("amount_fen")
+
+  @@index([reportId])
+  @@map("allocation_lines")
+}
+
+model ControlWarning {
+  id         String        @id
+  reportId   String        @map("report_id")
+  report     ExpenseReport @relation(fields: [reportId], references: [id])
+  code       String
+  message    String
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@index([reportId])
+  @@map("control_warnings")
+}
+
+model InvoiceVerificationAttempt {
+  id             String   @id
+  tenantId       String   @default("default") @map("tenant_id")
+  invoiceId      String   @map("invoice_id")
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id])
+  idempotencyKey String   @map("idempotency_key")
+  status         String
+  message        String   @default("")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([invoiceId])
+  @@map("invoice_verification_attempts")
+}
+
+model Contract {
+  id           String         @id
+  tenantId     String         @default("default") @map("tenant_id")
+  vendorId     String         @map("vendor_id")
+  vendor       Vendor         @relation(fields: [vendorId], references: [id])
+  employeeId   String         @map("employee_id")
+  employee     Employee       @relation(fields: [employeeId], references: [id])
+  title        String
+  amountFen    BigInt         @map("amount_fen")
+  status       String
+  version      Int            @default(1)
+  currency     String         @default("CNY")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  installments Installment[]
+  bills        CorporateBill[]
+
+  @@index([employeeId, createdAt])
+  @@map("contracts")
+}
+
+model Installment {
+  id         String   @id
+  contractId String   @map("contract_id")
+  contract   Contract @relation(fields: [contractId], references: [id])
+  sequence   Int
+  dueOn      String   @map("due_on")
+  amountFen  BigInt   @map("amount_fen")
+  paidFen    BigInt   @default(0) @map("paid_fen")
+  status     String   @default("pending")
+
+  @@unique([contractId, sequence])
+  @@map("installments")
+}
+
+model CorporateBill {
+  id             String    @id
+  tenantId       String    @default("default") @map("tenant_id")
+  employeeId     String    @map("employee_id")
+  employee       Employee  @relation(fields: [employeeId], references: [id])
+  vendorId       String    @map("vendor_id")
+  vendor         Vendor    @relation(fields: [vendorId], references: [id])
+  contractId     String?   @map("contract_id")
+  contract       Contract? @relation(fields: [contractId], references: [id])
+  invoiceNumber  String    @default("") @map("invoice_number")
+  amountFen      BigInt    @map("amount_fen")
+  status         String
+  version        Int       @default(1)
+  currency       String    @default("CNY")
+  currentActorId String?   @map("current_actor_id")
+  budgetLineId   String?   @map("budget_line_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  holds          BudgetHold[]
+
+  @@index([employeeId, createdAt])
+  @@map("corporate_bills")
+}
+
+model TravelOrder {
+  id              String         @id
+  tenantId        String         @default("default") @map("tenant_id")
+  employeeId      String         @map("employee_id")
+  employee        Employee       @relation(fields: [employeeId], references: [id])
+  provider        String
+  externalId      String         @map("external_id")
+  amountFen       BigInt         @map("amount_fen")
+  occurredOn      String         @map("occurred_on")
+  summary         String
+  expenseReportId String?        @map("expense_report_id")
+  createdAt       DateTime       @default(now()) @map("created_at")
+
+  @@unique([tenantId, provider, externalId])
+  @@map("travel_orders")
+}
+
+model Notification {
+  id          String   @id
+  tenantId    String   @default("default") @map("tenant_id")
+  kind        String
+  recipientId String   @map("recipient_id")
+  documentId  String   @map("document_id")
+  template    String
+  paramsJson  Json     @map("params_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([documentId, kind])
+  @@map("notifications")
+}
+
+model ExportJob {
+  id             String   @id
+  tenantId       String   @default("default") @map("tenant_id")
+  actorId        String   @map("actor_id")
+  status         String
+  objectKey      String   @default("") @map("object_key")
+  idempotencyKey String   @map("idempotency_key")
+  message        String   @default("")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, idempotencyKey])
+  @@map("export_jobs")
 }

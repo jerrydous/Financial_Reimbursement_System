@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Headers,
+  Inject,
   Param,
   Post,
   Query,
@@ -28,9 +29,9 @@ import { rethrowAsHttp } from './http-error';
 @UseGuards(AuthGuard)
 export class ExpenseReportsController {
   constructor(
-    private readonly employees: EmployeeService,
-    private readonly reports: ExpenseReportsService,
-    private readonly commands: ExpenseReportCommands,
+    @Inject(EmployeeService) private readonly employees: EmployeeService,
+    @Inject(ExpenseReportsService) private readonly reports: ExpenseReportsService,
+    @Inject(ExpenseReportCommands) private readonly commands: ExpenseReportCommands,
   ) {}
 
   @Get('expense-reports')
@@ -41,11 +42,14 @@ export class ExpenseReportsController {
     }
     try {
       const employee = await this.employees.getOwn(request.claims);
+      const handled = query.handled === '1';
       const inbox = query.inbox === '1';
-      const listed = inbox
-        ? await this.reports.listVisible(employee.id, parsed.data.page, parsed.data.pageSize, true)
-        : await this.reports.listOwn(employee.id, parsed.data.page, parsed.data.pageSize);
-      return expenseReportListSchema.parse(listed);
+      const result = handled
+        ? await this.reports.listHandled(employee.id, parsed.data.page, parsed.data.pageSize)
+        : inbox
+          ? await this.reports.listVisible(employee.id, parsed.data.page, parsed.data.pageSize, true)
+          : await this.reports.listOwn(employee.id, parsed.data.page, parsed.data.pageSize);
+      return expenseReportListSchema.parse(result);
     } catch (error) {
       if (error instanceof Error && error.message === 'PAGE_TOO_DEEP') {
         throw new BadRequestException({
@@ -79,7 +83,7 @@ export class ExpenseReportsController {
     }
     const employee = await this.employees.getOwn(request.claims);
     try {
-      return await this.commands.createDraft(employee.id, parsed.data.invoiceIds, idempotencyKey);
+      return await this.commands.createDraft(employee.id, parsed.data.invoiceIds, idempotencyKey, parsed.data);
     } catch (error) {
       rethrowAsHttp(error);
     }
