@@ -77,14 +77,14 @@ export async function uploadInvoice(file: File): Promise<InvoiceView> {
     method: 'POST',
     headers,
     body,
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(90_000),
   });
   return read(response);
 }
 
 export async function confirmInvoice(
   id: string,
-  input: { invoiceCode: string; invoiceNumber: string; amountFen: string },
+  input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency: string },
 ): Promise<InvoiceView> {
   return read(
     await request(`/invoices/${id}/confirm`, {

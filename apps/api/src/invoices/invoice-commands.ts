@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { v7 as uuidv7 } from 'uuid';
-import { pageOffset, type InvoiceList, type InvoiceView } from '@frs/contracts';
+import { currencyCodeSchema, pageOffset, type InvoiceList, type InvoiceView } from '@frs/contracts';
 import {
   ExpenseReportError,
   assertLedgerOpen,
@@ -66,8 +66,25 @@ export class InvoiceCommands {
     const fileSha256 = createHash('sha256').update(file.body).digest('hex');
     const existing = await this.prisma.invoice.findFirst({
       where: { tenantId: 'default', ownerEmployeeId, fileSha256 },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
     });
+    if (existing?.recognitionStatus === 'pending_confirmation' && existing.binding === 'released') {
+      const recognized = await this.recognizeDraft(file);
+      const updated = await this.prisma.invoice.update({
+        where: { id: existing.id },
+        data: {
+          invoiceCode: recognized.draft.invoiceCode || existing.invoiceCode,
+          invoiceNumber: recognized.draft.invoiceNumber || existing.invoiceNumber,
+          amountFen: recognized.draft.amountFen === null ? existing.amountFen : BigInt(recognized.draft.amountFen),
+          sellerName: recognized.draft.sellerName || existing.sellerName,
+          invoiceDate: recognized.draft.invoiceDate || existing.invoiceDate,
+          ocrStatus: recognized.status,
+          ocrMessage: recognized.message,
+          ocrRequestId: recognized.requestId,
+        },
+      });
+      return toInvoiceView(updated);
+    }
     if (existing) {
       return { ...toInvoiceView(existing), reused: true };
     }
@@ -86,6 +103,7 @@ export class InvoiceCommands {
           invoiceCode: recognized.draft.invoiceCode,
           invoiceNumber: recognized.draft.invoiceNumber,
           amountFen: recognized.draft.amountFen === null ? null : BigInt(recognized.draft.amountFen),
+          currency: 'CNY',
           sellerName: recognized.draft.sellerName,
           invoiceDate: recognized.draft.invoiceDate,
           ocrStatus: recognized.status,
@@ -116,8 +134,12 @@ export class InvoiceCommands {
   async confirm(
     ownerEmployeeId: string,
     invoiceId: string,
-    input: { invoiceCode: string; invoiceNumber: string; amountFen: string },
+    input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency?: string },
   ): Promise<InvoiceView> {
+    const currency = currencyCodeSchema.safeParse(input.currency ?? 'CNY');
+    if (!currency.success) {
+      throw new ExpenseReportError('CURRENCY_MISMATCH', '币种不支持');
+    }
     const amount = parseFen(input.amountFen);
     assertVerificationUnverified('unverified');
     if (!input.invoiceNumber.trim()) {
@@ -142,6 +164,7 @@ export class InvoiceCommands {
           invoiceCode: input.invoiceCode.trim(),
           invoiceNumber: input.invoiceNumber.trim(),
           amountFen: amount,
+          currency: currency.data,
           recognitionStatus: confirmRecognition(invoice.recognitionStatus as RecognitionStatus),
           verificationStatus: 'unverified',
         },
@@ -329,6 +352,7 @@ export class InvoiceCommands {
           invoiceCode: source.invoiceCode,
           invoiceNumber: source.invoiceNumber,
           amountFen: source.amountFen,
+          currency: source.currency,
           sellerName: source.sellerName,
           invoiceDate: source.invoiceDate,
           ocrStatus: source.ocrStatus,
@@ -414,6 +438,7 @@ function toInvoiceView(invoice: {
   invoiceCode: string;
   invoiceNumber: string;
   amountFen: bigint | null;
+  currency: string;
   sellerName: string;
   invoiceDate: string;
   buyerName: string;
@@ -432,6 +457,7 @@ function toInvoiceView(invoice: {
     invoiceCode: invoice.invoiceCode,
     invoiceNumber: invoice.invoiceNumber,
     amountFen: invoice.amountFen?.toString() ?? null,
+    currency: currencyCodeSchema.parse(invoice.currency),
     sellerName: invoice.sellerName,
     invoiceDate: invoice.invoiceDate,
     ledgerStatus: invoice.ledgerStatus as InvoiceView['ledgerStatus'],

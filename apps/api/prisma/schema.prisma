@@ -96,6 +96,7 @@ model Invoice {
   invoiceCode         String        @default("") @map("invoice_code")
   invoiceNumber       String        @default("") @map("invoice_number")
   amountFen           BigInt?       @map("amount_fen")
+  currency            String        @default("CNY")
   sellerName          String        @default("") @map("seller_name")
   invoiceDate         String        @default("") @map("invoice_date")
   buyerName           String        @default("") @map("buyer_name")

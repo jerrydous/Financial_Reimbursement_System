@@ -1,5 +1,6 @@
 // 增值税发票识别来自腾讯云 OCR 官方 SDK。本文件只提交影像并取出字段。
 import { draftFromVatPairs, type OcrDraft } from '@frs/domain';
+import { TesseractInvoiceOcr } from './tesseract-invoice-ocr';
 
 export type InvoiceOcrResult = {
   pairs: { name: string; value: string }[];
@@ -59,18 +60,23 @@ export class TencentVatInvoiceOcr {
 
 export function createInvoiceOcrFromEnv(): { recognize(file: { body: Buffer; contentType: string }): Promise<{ pairs: { name: string; value: string }[]; requestId: string } | null> } {
   const provider = (process.env.OCR_PROVIDER ?? '').trim().toLowerCase();
-  if (provider !== 'tencent') {
+  if (provider === 'off' || provider === 'none') {
     return { recognize: async () => null };
   }
-  const ocr = new TencentVatInvoiceOcr({
-    secretId: process.env.TENCENT_SECRET_ID ?? '',
-    secretKey: process.env.TENCENT_SECRET_KEY ?? '',
-    region: process.env.TENCENT_OCR_REGION ?? 'ap-guangzhou',
-  });
+  if (provider === 'tencent') {
+    const ocr = new TencentVatInvoiceOcr({
+      secretId: process.env.TENCENT_SECRET_ID ?? '',
+      secretKey: process.env.TENCENT_SECRET_KEY ?? '',
+      region: process.env.TENCENT_OCR_REGION ?? 'ap-guangzhou',
+    });
+    return {
+      recognize: async (file) => {
+        const result = await ocr.recognize(file);
+        return { pairs: result.pairs, requestId: result.requestId };
+      },
+    };
+  }
   return {
-    recognize: async (file) => {
-      const result = await ocr.recognize(file);
-      return { pairs: result.pairs, requestId: result.requestId };
-    },
+    recognize: async (file) => new TesseractInvoiceOcr().recognize(file),
   };
 }

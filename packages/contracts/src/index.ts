@@ -74,10 +74,14 @@ export const expenseReportActionSchema = z.enum([
   'skip_to_finance',
 ]);
 
+/** 票面币种。金额仍按该币种的最小单位保存，不在币种之间换算。 */
+export const currencyCodeSchema = z.enum(['CNY', 'USD', 'EUR', 'HKD', 'GBP', 'SGD', 'JPY']);
+
 export const expenseReportItemSchema = z.object({
   id: z.string().uuid(),
   status: expenseReportStatusSchema,
   amountFen: fenStringSchema,
+  currency: currencyCodeSchema,
   createdAt: z.string().datetime(),
 });
 
@@ -93,6 +97,7 @@ export const invoiceViewSchema = z.object({
   invoiceCode: z.string(),
   invoiceNumber: z.string(),
   amountFen: fenStringSchema.nullable(),
+  currency: currencyCodeSchema,
   sellerName: z.string(),
   invoiceDate: z.string(),
   ledgerStatus: z.enum(['open', 'exempt', 'removed', 'transferred']),
@@ -135,7 +140,7 @@ export const expenseReportDetailSchema = z.object({
   amountFen: fenStringSchema,
   submittedAmountFen: fenStringSchema.nullable(),
   approvedAmountFen: fenStringSchema.nullable(),
-  currency: z.literal('CNY'),
+  currency: currencyCodeSchema,
   version: z.number().int(),
   currentStep: z.enum(['manager', 'finance', 'cashier']).nullable(),
   currentActorId: z.string().nullable(),
@@ -180,6 +185,7 @@ export const confirmInvoiceSchema = z.object({
   invoiceCode: z.string().max(32),
   invoiceNumber: z.string().min(1).max(32),
   amountFen: fenStringSchema,
+  currency: currencyCodeSchema.default('CNY'),
 });
 
 export const financeAdjustmentSchema = z.object({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assertLedgerOpen, draftFromVatPairs, ledgerBucket } from './invoice';
+import { assertLedgerOpen, draftFromVatPairs, ledgerBucket, pairsFromInvoiceText } from './invoice';
 
 describe('发票分类', () => {
   it('占用中的发票归入已报销，其余按台账状态分类', () => {
@@ -36,6 +36,25 @@ describe('增值税发票识别草稿', () => {
     });
   });
 
+  it('从票面文字自己对应发票号码、金额、日期和销售方', () => {
+    const draft = draftFromVatPairs(
+      pairsFromInvoiceText(`
+        电子发票（普通发票）
+        发票号码：26112000000706612096
+        开票日期：2024年3月7日
+        销售方
+        名称：示例餐饮店
+        价税合计（小写） ¥1,234.50
+      `),
+    );
+    expect(draft).toEqual({
+      invoiceCode: '',
+      invoiceNumber: '26112000000706612096',
+      amountFen: '123450',
+      sellerName: '示例餐饮店',
+      invoiceDate: '2024-03-07',
+    });
+  });
   it('金额无法解析时留空，不把识别结果当成已入账', () => {
     const draft = draftFromVatPairs([{ name: '发票号码', value: '99' }, { name: '小写金额', value: '见备注' }]);
     expect(draft.invoiceNumber).toBe('99');

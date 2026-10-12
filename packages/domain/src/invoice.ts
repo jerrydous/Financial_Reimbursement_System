@@ -123,6 +123,87 @@ export function draftFromVatPairs(pairs: readonly VatInvoicePair[]): OcrDraft {
   };
 }
 
+/** 从票面文字里抽出增值税字段。OCR 引擎只负责出字，字段对应由这里完成。 */
+export function pairsFromInvoiceText(text: string): VatInvoicePair[] {
+  const source = collapseGlyphSpaces(text.replace(/\u00a0/g, ' '));
+  const pairs: VatInvoicePair[] = [];
+  const code = source.match(/发票代码[:：\s]*([0-9]{10,12})/);
+  if (code?.[1]) {
+    pairs.push({ name: '发票代码', value: code[1] });
+  }
+  const number = source.match(/发票号码[:：\s]*([0-9]{8,20})/);
+  const detachedNumber = source.match(/(?<![0-9])([0-9]{20})(?![0-9])/) ?? source.match(/(?<![0-9])([0-9]{8})(?![0-9])/);
+  const invoiceNumber = number?.[1] ?? (source.includes('发票号码') ? detachedNumber?.[1] : undefined);
+  if (invoiceNumber) {
+    pairs.push({ name: '发票号码', value: invoiceNumber });
+  }
+  const date =
+    source.match(/开票日期[:：\s]*(\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日|\d{4}[-/.]\d{1,2}[-/.]\d{1,2})/) ??
+    source.match(/(\d{4}年\d{1,2}月\d{1,2}日)/);
+  if (date?.[1] && source.includes('开票日期')) {
+    pairs.push({ name: '开票日期', value: date[1].replace(/\s/g, '') });
+  }
+  const adjacentAmount =
+    source.match(/价税合计[\s\S]{0,40}?([¥￥]\s*[0-9,]+\.\d{2})/) ??
+    source.match(/小写[）)]?\s*([¥￥]?\s*[0-9,]+\.\d{2})/);
+  const amountValue = adjacentAmount?.[1] ?? largestMoney(source);
+  if (amountValue && (source.includes('价税合计') || source.includes('小写'))) {
+    pairs.push({ name: '价税合计(小写)', value: amountValue.replace(/\s/g, '') });
+  }
+  const seller = source.match(/销售方[\s\S]{0,80}?名称[:：]\s*([^\n]{2,80})/);
+  const sellerName = usableSeller(seller?.[1] ?? '') || companyName(source);
+  if (sellerName) {
+    pairs.push({ name: '销售方名称', value: sellerName });
+  }
+  return pairs;
+}
+
+function collapseGlyphSpaces(text: string): string {
+  let current = text;
+  let previous = '';
+  while (current !== previous) {
+    previous = current;
+    current = current.replace(/([一-龥（）])[ \t\u3000]+(?=[一-龥（）])/g, '$1');
+  }
+  return current;
+}
+
+function cleanSeller(value: string): string {
+  return value.replace(/\s+/g, '').replace(/纳税人识别号.*$/, '').replace(/地址.*$/, '');
+}
+
+function usableSeller(value: string): string {
+  const name = cleanSeller(value);
+  if (!name || /统一社会|纳税人|购买方|销售方|信息|价税合计/.test(name)) {
+    return '';
+  }
+  return name;
+}
+
+function companyName(text: string): string {
+  const names = [...text.matchAll(/[一-龥（）()]{2,40}公司/g)].map((match) => match[0]);
+  return names.at(-1) ?? '';
+}
+
+function largestMoney(text: string): string {
+  const found = [...text.matchAll(/[¥￥]\s*([0-9,]+\.\d{2})/g)];
+  let best = '';
+  let bestFen = -1n;
+  for (const match of found) {
+    const raw = match[1] ?? '';
+    try {
+      const fen = yuanTextToFen(normalizeYuan(raw));
+      if (fen > bestFen) {
+        bestFen = fen;
+        best = `¥${raw.replace(/\s/g, '')}`;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return best;
+}
+
 function normalizeYuan(input: string): string {
   const cleaned = input.replace(/[¥￥,\s]/g, '');
   if (/^\d+\.\d$/.test(cleaned)) {

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Dropdown, Form, Input, Modal, Select, Space, Table, Typography } from 'antd';
-import { fenToYuanText, parseFen, yuanTextToFen } from '@frs/domain';
+import { amountTextToMinor, minorToAmountText, minorUnitDigits, parseFen } from '@frs/domain';
 import { useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -17,9 +17,7 @@ import {
   type ExpenseReportDetail,
 } from './api';
 import { InvoicePreview, useInvoicePreview } from './invoice-preview';
-import { actionLabel, formatWhen, isActiveStatus, roleLabel, shortNo, statusLabel, verificationLabel } from './labels';
-
-const yuanPattern = /^\d+\.\d{2}$/;
+import { actionLabel, currencyOptions, formatMoney, formatWhen, isActiveStatus, roleLabel, shortNo, statusLabel, verificationLabel } from './labels';
 
 const documentTabs = [
   { key: 'expense', label: '报销单' },
@@ -118,9 +116,9 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
             { title: '标题', dataIndex: 'title' },
             { title: '状态', dataIndex: 'status', render: (status: string) => statusLabel[status] ?? status },
             {
-              title: '金额（元）',
+              title: '金额',
               dataIndex: 'amountFen',
-              render: (amountFen: string) => fenToYuanText(parseFen(amountFen)),
+              render: (amountFen: string) => formatMoney(amountFen, 'CNY'),
             },
             { title: '时间', dataIndex: 'createdAt', render: (value: string) => formatWhen(value) },
           ]}
@@ -146,9 +144,9 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
           },
           { title: '状态', dataIndex: 'status', render: (status: string) => statusLabel[status] ?? status },
           {
-            title: '金额（元）',
+            title: '金额',
             dataIndex: 'amountFen',
-            render: (amountFen: string) => fenToYuanText(parseFen(amountFen)),
+            render: (amountFen: string, row) => formatMoney(amountFen, row.currency),
           },
           { title: '创建时间', dataIndex: 'createdAt', render: (value: string) => formatWhen(value) },
         ]}
@@ -169,7 +167,8 @@ export function NewReportPage() {
   const [file, setFile] = useState<File | null>(null);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [sellerName, setSellerName] = useState('');
-  const [form] = Form.useForm<{ invoiceCode?: string; invoiceNumber: string; yuan: string }>();
+  const [form] = Form.useForm<{ invoiceCode?: string; invoiceNumber: string; yuan: string; currency: string }>();
+  const currency = Form.useWatch('currency', form) ?? 'CNY';
   const pendingKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const recognize = useMutation({
     mutationFn: async () => {
@@ -184,10 +183,13 @@ export function NewReportPage() {
       form.setFieldsValue({
         invoiceCode: stored.invoiceCode,
         invoiceNumber: stored.invoiceNumber,
-        yuan: stored.amountFen ? fenToYuanText(parseFen(stored.amountFen)) : '',
+        currency: stored.currency || 'CNY',
+        yuan: stored.amountFen ? minorToAmountText(parseFen(stored.amountFen), stored.currency || 'CNY') : '',
       });
-      if (stored.reused) {
-        message.info('这张影像之前传过，已使用原来的发票');
+      if (stored.reused && stored.binding === 'active') {
+        message.warning('这张影像已经在报销单里，不会再新建一份');
+      } else if (stored.reused) {
+        message.info('这张影像已经确认过，在下面的列表里选用即可');
       } else if (stored.ocrStatus === 'recognized') {
         message.success(stored.sellerName ? `已识别：${stored.sellerName}` : '已识别发票内容，请核对后确认');
       } else {
@@ -199,14 +201,15 @@ export function NewReportPage() {
     },
   });
   const confirm = useMutation({
-    mutationFn: async (values: { invoiceCode?: string; invoiceNumber: string; yuan: string }) => {
+    mutationFn: async (values: { invoiceCode?: string; invoiceNumber: string; yuan: string; currency: string }) => {
       if (!draftId) {
         throw new Error('请先上传并识别发票');
       }
       await confirmInvoice(draftId, {
         invoiceCode: values.invoiceCode ?? '',
         invoiceNumber: values.invoiceNumber,
-        amountFen: yuanTextToFen(values.yuan).toString(),
+        amountFen: amountTextToMinor(values.yuan, values.currency).toString(),
+        currency: values.currency,
       });
     },
     onSuccess: async () => {
@@ -239,14 +242,14 @@ export function NewReportPage() {
       message.error(error instanceof Error ? error.message : '报销单没有提交');
     },
   });
-  const available = (invoices.data?.items ?? []).filter((item) => item.recognitionStatus === 'confirmed' && item.binding === 'released');
+  const rows = invoices.data?.items ?? [];
 
   return (
     <div className="page">
       <section className="panel">
         <div className="panel-head">
           <h3>记费用</h3>
-          <Typography.Text className="quiet">上传后由腾讯云增值税发票识别填写草稿。请核对后再确认，验真状态仍是未验真。</Typography.Text>
+          <Typography.Text className="quiet">上传后用开源文字识别填写草稿。请核对后再确认，验真状态仍是未验真。</Typography.Text>
         </div>
         <Form
           form={form}
@@ -278,12 +281,28 @@ export function NewReportPage() {
           <Form.Item label="发票号码" name="invoiceNumber" rules={[{ required: true, message: '填写发票号码' }]}>
             <Input />
           </Form.Item>
+          <Form.Item label="币种" name="currency" initialValue="CNY" rules={[{ required: true, message: '选择币种' }]}>
+            <Select options={[...currencyOptions]} style={{ maxWidth: 240 }} />
+          </Form.Item>
           <Form.Item
-            label="价税合计（元）"
+            label="价税合计"
             name="yuan"
-            rules={[{ required: true, message: '填写金额' }, { pattern: yuanPattern, message: '写成 12.30 这样的两位小数' }]}
+            extra={minorUnitDigits(currency) === 0 ? '日元填整数，例如 1200。不同币种不会自动换汇。' : '按票面币种填写，保留两位小数，例如 12.30。不同币种不会自动换汇。'}
+            rules={[
+              { required: true, message: '填写金额' },
+              {
+                validator: (_, value) => {
+                  try {
+                    amountTextToMinor(String(value ?? ''), currency);
+                    return Promise.resolve();
+                  } catch (error) {
+                    return Promise.reject(new Error(error instanceof Error ? error.message : '金额不合法'));
+                  }
+                },
+              },
+            ]}
           >
-            <Input placeholder="12.30" style={{ maxWidth: 240 }} />
+            <Input placeholder={minorUnitDigits(currency) === 0 ? '1200' : '12.30'} style={{ maxWidth: 240 }} />
           </Form.Item>
           <Button htmlType="submit" loading={confirm.isPending} disabled={!draftId}>
             确认发票
@@ -299,9 +318,13 @@ export function NewReportPage() {
         </div>
         <Table
           rowKey="id"
-          rowSelection={{ selectedRowKeys: selected, onChange: (keys) => setSelected(keys.map(String)) }}
-          dataSource={available}
-          locale={{ emptyText: '还没有已确认且未占用的发票' }}
+          rowSelection={{
+            selectedRowKeys: selected,
+            onChange: (keys) => setSelected(keys.map(String)),
+            getCheckboxProps: (row) => ({ disabled: row.recognitionStatus !== 'confirmed' || row.binding !== 'released' }),
+          }}
+          dataSource={rows}
+          locale={{ emptyText: '还没有未报销的发票。上传并确认后会出现在这里' }}
           pagination={{
             current: page,
             pageSize: 20,
@@ -310,11 +333,16 @@ export function NewReportPage() {
             onChange: setPage,
           }}
           columns={[
-            { title: '发票号码', dataIndex: 'invoiceNumber' },
+            { title: '发票号码', dataIndex: 'invoiceNumber', render: (value: string) => value || '待识别' },
             {
-              title: '金额（元）',
+              title: '金额',
               dataIndex: 'amountFen',
-              render: (amount: string | null) => (amount ? fenToYuanText(parseFen(amount)) : ''),
+              render: (amount: string | null, row) => formatMoney(amount, row.currency),
+            },
+            {
+              title: '状态',
+              dataIndex: 'recognitionStatus',
+              render: (value: string) => (value === 'confirmed' ? '已确认' : '待确认'),
             },
             { title: '验真', dataIndex: 'verificationStatus', render: (value: string) => verificationLabel[value] ?? '未验真' },
           ]}
@@ -411,16 +439,16 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
       <section className="panel">
         <Space size="large" wrap>
           <div>
-            <div className="quiet">金额（元）</div>
-            <strong>{fenToYuanText(parseFen(current.amountFen))}</strong>
+            <div className="quiet">金额</div>
+            <strong>{formatMoney(current.amountFen, current.currency)}</strong>
           </div>
           <div>
             <div className="quiet">员工原始金额</div>
-            <div>{current.submittedAmountFen ? fenToYuanText(parseFen(current.submittedAmountFen)) : '尚未提交'}</div>
+            <div>{current.submittedAmountFen ? formatMoney(current.submittedAmountFen, current.currency) : '尚未提交'}</div>
           </div>
           <div>
             <div className="quiet">批准金额</div>
-            <div>{current.approvedAmountFen ? fenToYuanText(parseFen(current.approvedAmountFen)) : '尚未提交'}</div>
+            <div>{current.approvedAmountFen ? formatMoney(current.approvedAmountFen, current.currency) : '尚未提交'}</div>
           </div>
         </Space>
         {current.warnings.length > 0 ? (
@@ -487,13 +515,9 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
           setAmountError('');
         }}
         onOk={() => {
-          if (!yuanPattern.test(approvedYuan.trim())) {
-            setAmountError('写成 12.30 这样的两位小数');
-            return;
-          }
           let fen: string;
           try {
-            fen = yuanTextToFen(approvedYuan.trim()).toString();
+            fen = amountTextToMinor(approvedYuan.trim(), current.currency).toString();
           } catch (error) {
             setAmountError(error instanceof Error ? error.message : '金额不合法');
             return;
@@ -501,7 +525,7 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
           void act.mutateAsync({ action: 'finance-adjustment', body: { approvedAmountFen: fen } });
         }}
       >
-        <Input placeholder="12.30" value={approvedYuan} status={amountError ? 'error' : ''} onChange={(event) => setApprovedYuan(event.target.value)} />
+        <Input placeholder={minorUnitDigits(current.currency) === 0 ? '1200' : '12.30'} value={approvedYuan} status={amountError ? 'error' : ''} onChange={(event) => setApprovedYuan(event.target.value)} />
         {amountError ? <div style={{ color: '#cf1322', marginTop: 8 }}>{amountError}</div> : null}
       </Modal>
     </div>
@@ -571,9 +595,9 @@ function InvoiceTable({ report }: { report: ExpenseReportDetail }) {
           { title: '发票代码', dataIndex: 'invoiceCode', render: (value: string) => value || '—' },
           { title: '发票号码', dataIndex: 'invoiceNumber' },
           {
-            title: '金额（元）',
+            title: '金额',
             dataIndex: 'amountFen',
-            render: (amount: string | null) => (amount ? fenToYuanText(parseFen(amount)) : ''),
+            render: (amount: string | null, row) => formatMoney(amount, row.currency || report.currency),
           },
           { title: '验真', dataIndex: 'verificationStatus', render: (value: string) => verificationLabel[value] ?? '未验真' },
           {

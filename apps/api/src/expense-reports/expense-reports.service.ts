@@ -65,7 +65,7 @@ export class ExpenseReportsService {
   }
 
   private toList(
-    rows: { id: string; status: string; amountFen: bigint; createdAt: Date }[],
+    rows: { id: string; status: string; amountFen: bigint; currency: string; createdAt: Date }[],
     page: number,
     pageSize: number,
     total: number,
@@ -75,6 +75,7 @@ export class ExpenseReportsService {
         id: row.id,
         status: row.status,
         amountFen: row.amountFen.toString(),
+        currency: row.currency,
         createdAt: row.createdAt.toISOString(),
       })),
       page,

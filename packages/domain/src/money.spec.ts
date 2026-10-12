@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addFen, compareFen, fenToString, fenToYuanText, parseFen, yuanTextToFen } from './money';
+import { addFen, amountTextToMinor, compareFen, fenToString, fenToYuanText, minorToAmountText, parseFen, yuanTextToFen } from './money';
 
 describe('金额以整数分计算', () => {
   it('拒绝小数、科学计数和前导零', () => {
@@ -25,5 +25,14 @@ describe('金额以整数分计算', () => {
     expect(fenToYuanText(sum)).toBe('0.30');
     expect(() => yuanTextToFen('1.2')).toThrow(/两位小数/);
     expect(() => yuanTextToFen('1')).toThrow(/两位小数/);
+  });
+
+  it('外币按票面最小单位换算，日元不乘 100', () => {
+    expect(amountTextToMinor('12.30', 'USD')).toBe(1230n);
+    expect(minorToAmountText(amountTextToMinor('12.30', 'EUR'), 'EUR')).toBe('12.30');
+    const yen = amountTextToMinor('1200', 'JPY');
+    expect(yen).toBe(1200n);
+    expect(minorToAmountText(yen, 'JPY')).toBe('1200');
+    expect(() => amountTextToMinor('12.30', 'JPY')).toThrow(/整数/);
   });
 });

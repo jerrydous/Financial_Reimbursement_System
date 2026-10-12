@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { v7 as uuidv7 } from 'uuid';
 import { WorkflowNotRunning, enforceDocumentPolicy, type ExpenseDecisionSignal } from '@frs/adapters';
-import type { ExpenseReportDetail } from '@frs/contracts';
+import { currencyCodeSchema, type ExpenseReportDetail } from '@frs/contracts';
 import {
   DomainError,
   ExpenseReportError,
@@ -326,6 +326,15 @@ export class ExpenseReportCommands {
           ),
         );
       }
+      const currencies = [...new Set(invoices.map((invoice) => invoice.currency))];
+      const parsedCurrency = currencyCodeSchema.safeParse(currencies[0]);
+      if (currencies.length !== 1 || !parsedCurrency.success) {
+        throw new ExpenseReportError('CURRENCY_MISMATCH', '一张报销单只能使用同一种币种，系统不会自动换汇');
+      }
+      const currency = parsedCurrency.data;
+      if (currency !== 'CNY' && (extras.subsidy || extras.budgetLineId || extras.applicationId || (extras.writeOffs?.length ?? 0) > 0)) {
+        throw new ExpenseReportError('CURRENCY_MISMATCH', '外币发票暂不和人民币补贴、预算、申请或借款冲销混在一张单里');
+      }
       const invoiceTotal = sumFen(amounts);
       const employee = await tx.employee.findUnique({ where: { id: employeeId }, include: { company: true } });
       if (!employee) {
@@ -373,7 +382,7 @@ export class ExpenseReportCommands {
           employeeId,
           status: 'draft',
           amountFen: total,
-          currency: 'CNY',
+          currency,
           workflowId: expenseWorkflowId(reportId),
           approvalMode: mode,
           applicationId: extras.applicationId ?? null,

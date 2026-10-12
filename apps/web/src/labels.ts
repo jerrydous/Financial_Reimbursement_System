@@ -1,3 +1,22 @@
+import { minorToAmountText, parseFen } from '@frs/domain';
+
+export const currencyOptions = [
+  { value: 'CNY', label: '人民币 CNY' },
+  { value: 'USD', label: '美元 USD' },
+  { value: 'EUR', label: '欧元 EUR' },
+  { value: 'HKD', label: '港币 HKD' },
+  { value: 'GBP', label: '英镑 GBP' },
+  { value: 'SGD', label: '新加坡元 SGD' },
+  { value: 'JPY', label: '日元 JPY' },
+] as const;
+
+export function formatMoney(amountFen: string | null | undefined, currency = 'CNY'): string {
+  if (!amountFen) {
+    return '—';
+  }
+  return `${minorToAmountText(parseFen(amountFen), currency)} ${currency}`;
+}
+
 export const roleLabel: Record<string, string> = {
   employee: '员工',
   manager: '主管',

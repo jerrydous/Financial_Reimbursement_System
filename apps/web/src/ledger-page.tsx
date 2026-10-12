@@ -1,10 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { App as AntdApp, Button, Dropdown, Modal, Select, Table, Typography } from 'antd';
-import { fenToYuanText, parseFen } from '@frs/domain';
 import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { classifyInvoice, createExpenseReport, createLedgerExport, listColleagues, listInvoices, submitExpenseReport, transferInvoice, verifyInvoice } from './api';
-import { roleLabel, verificationLabel } from './labels';
+import { formatMoney, roleLabel, verificationLabel } from './labels';
 
 const buckets = [
   { key: 'unreimbursed', label: '未报销' },
@@ -141,14 +140,14 @@ export function LedgerPage({ enabled }: { enabled: boolean }) {
           { title: '销售方', dataIndex: 'sellerName', render: (value: string) => value || '—' },
           { title: '开票日期', dataIndex: 'invoiceDate', render: (value: string) => value || '—' },
           {
-            title: '价税合计（元）',
+            title: '价税合计',
             dataIndex: 'amountFen',
-            render: (amount: string | null) => (amount ? fenToYuanText(parseFen(amount)) : '—'),
+            render: (amount: string | null, row) => formatMoney(amount, row.currency),
           },
           {
             title: '验真',
             dataIndex: 'verificationStatus',
-            render: (value: string, row: { id: string; recognitionStatus: string }) => (
+            render: (value: string, row: { id: string; recognitionStatus: string; currency: string }) => (
               <span>
                 {verificationLabel[value] ?? value}
                 {value === 'unverified' && row.recognitionStatus === 'confirmed' ? (

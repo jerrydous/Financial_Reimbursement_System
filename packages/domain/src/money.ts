@@ -48,7 +48,30 @@ export function sumFen(values: readonly Fen[]): Fen {
   return total as Fen;
 }
 
+const INTEGER_AMOUNT = /^(0|[1-9]\d*)$/;
 const YUAN_TEXT = /^(\d+)\.(\d{2})$/;
+
+/** 日元没有辅币。其余报销币种按两位小数的最小单位记账，不在币种之间换算。 */
+export function minorUnitDigits(currency: string): 0 | 2 {
+  return currency === 'JPY' ? 0 : 2;
+}
+
+export function amountTextToMinor(input: string, currency: string): Fen {
+  if (minorUnitDigits(currency) === 0) {
+    if (typeof input !== 'string' || !INTEGER_AMOUNT.test(input.trim())) {
+      throw new MoneyError('AMOUNT_NOT_YUAN', '日元金额必须是整数，例如 1200');
+    }
+    return parseFen(input.trim());
+  }
+  return yuanTextToFen(input);
+}
+
+export function minorToAmountText(value: Fen, currency: string): string {
+  if (minorUnitDigits(currency) === 0) {
+    return fenToString(value);
+  }
+  return fenToYuanText(value);
+}
 
 /** 展示层输入。只按十进制字符串换算成分，不经过 Number。 */
 export function yuanTextToFen(input: string): Fen {

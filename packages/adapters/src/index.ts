@@ -9,6 +9,7 @@ export {
 } from './s3-invoice-storage';
 export { TemporalExpenseWorkflow, WorkflowNotRunning, type ExpenseDecisionSignal } from './temporal-expense-workflow';
 export { TencentVatInvoiceOcr, createInvoiceOcrFromEnv } from './tencent-vat-invoice-ocr';
+export { TesseractInvoiceOcr } from './tesseract-invoice-ocr';
 export { defaultPolicyRules, evaluatePolicyRules } from './policy-engine';
 export { buildLedgerWorkbook, ledgerColumns, type LedgerRow } from './ledger-workbook';
 export {
