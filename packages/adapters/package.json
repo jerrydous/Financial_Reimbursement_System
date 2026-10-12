@@ -1,0 +1,25 @@
+{
+  "name": "@frs/adapters",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1148.0",
+    "@temporalio/client": "^1.24.0",
+    "@aws-sdk/s3-request-presigner": "^3.1148.0",
+    "@frs/domain": "workspace:*",
+    "@smithy/node-http-handler": "^4.12.1",
+    "casbin": "^5.51.1",
+    "express-session": "^1.18.1",
+    "keycloak-connect": "^26.1.1"
+  },
+  "devDependencies": {
+    "@types/express-session": "^1.18.2",
+    "@types/node": "^22.15.30",
+    "typescript": "^5.8.3"
+  }
+}
