@@ -145,6 +145,7 @@ export const expenseReportDetailSchema = z.object({
   currentStep: z.enum(['manager', 'finance', 'cashier']).nullable(),
   currentActorId: z.string().nullable(),
   approvalMode: z.enum(['single', 'any', 'all']),
+  canAct: z.boolean().default(false),
   subsidyFen: fenStringSchema,
   createdAt: z.string().datetime(),
   invoices: z.array(invoiceViewSchema),
@@ -186,6 +187,9 @@ export const confirmInvoiceSchema = z.object({
   invoiceNumber: z.string().min(1).max(32),
   amountFen: fenStringSchema,
   currency: currencyCodeSchema.default('CNY'),
+  buyerName: z.string().max(80).optional(),
+  buyerTaxId: z.string().max(32).optional(),
+  invoiceDate: z.string().max(20).optional(),
 });
 
 export const financeAdjustmentSchema = z.object({

@@ -12,6 +12,7 @@ export function buildVoucherPayload(input: {
   status: string;
   paidOn: string;
   amount: Fen;
+  currency?: string;
   explanation: string;
 }): VoucherDraft {
   return voucherFromPaidReport(input);
@@ -25,6 +26,7 @@ export class KingdeeVoucherExport {
     status: string;
     paidOn: string;
     amount: Fen;
+    currency?: string;
     explanation: string;
   }): Promise<VoucherExportResult> {
     const payload = buildVoucherPayload(input);

@@ -35,7 +35,16 @@ export class ExpenseReportsService {
   ): Promise<ExpenseReportList> {
     const skip = pageOffset(page, pageSize);
     const principals = inbox ? await this.proxyPrincipals(actorId) : [];
+    const deskPeople = inbox
+      ? await this.prisma.employee.findMany({
+          where: { id: { in: [actorId, ...principals] } },
+          select: { role: true, companyId: true },
+        })
+      : [];
+    const financeCompanies = [...new Set(deskPeople.filter((person) => person.role === 'finance').map((person) => person.companyId))];
+    const cashierCompanies = [...new Set(deskPeople.filter((person) => person.role === 'cashier').map((person) => person.companyId))];
     const readByActor = { accesses: { some: { actorId, action: 'read', revokedAt: null } } };
+    const pendingVoters = [actorId, ...principals];
     const where = inbox
       ? {
           OR: [
@@ -51,6 +60,14 @@ export class ExpenseReportsService {
                     ],
                   },
                 ]),
+            {
+              approvalMode: { in: ['any', 'all'] },
+              status: 'approving',
+              votes: { some: { decision: 'pending', actorId: { in: pendingVoters } } },
+              accesses: { some: { actorId, action: 'read', revokedAt: null } },
+            },
+            ...(financeCompanies.length === 0 ? [] : [{ status: 'finance_review', employee: { companyId: { in: financeCompanies } } }]),
+            ...(cashierCompanies.length === 0 ? [] : [{ status: 'paying', employee: { companyId: { in: cashierCompanies } } }]),
           ],
         }
       : readByActor;

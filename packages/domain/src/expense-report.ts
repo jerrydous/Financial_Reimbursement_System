@@ -191,8 +191,8 @@ export function nextActorAfter(
 }
 
 export function assertSingleRoleAssignee(role: 'finance' | 'cashier', count: number): void {
-  if (count !== 1) {
-    throw new ExpenseReportError('ROLE_ASSIGNEE_AMBIGUOUS', `本公司的${role === 'finance' ? '财务' : '出纳'}岗必须且只能有一名员工`);
+  if (count < 1) {
+    throw new ExpenseReportError('ROLE_ASSIGNEE_AMBIGUOUS', `本公司的${role === 'finance' ? '财务' : '出纳'}岗至少要有一名员工`);
   }
 }
 

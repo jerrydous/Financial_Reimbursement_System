@@ -84,7 +84,15 @@ export async function uploadInvoice(file: File): Promise<InvoiceView> {
 
 export async function confirmInvoice(
   id: string,
-  input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency: string },
+  input: {
+    invoiceCode: string;
+    invoiceNumber: string;
+    amountFen: string;
+    currency: string;
+    buyerName?: string;
+    buyerTaxId?: string;
+    invoiceDate?: string;
+  },
 ): Promise<InvoiceView> {
   return read(
     await request(`/invoices/${id}/confirm`, {
@@ -153,9 +161,10 @@ const documentPath: Record<string, string> = {
   travel: '/travel-orders',
 };
 
-export async function listDocuments(kind: string, page = 1, pageSize = 8): Promise<DocumentList> {
+export async function listDocuments(kind: string, page = 1, pageSize = 8, inbox = false): Promise<DocumentList> {
   const path = documentPath[kind] ?? '/applications';
-  return read(await request(`${path}?page=${page}&pageSize=${pageSize}`));
+  const scope = inbox ? '&inbox=1' : '';
+  return read(await request(`${path}?page=${page}&pageSize=${pageSize}${scope}`));
 }
 
 export async function postJson(path: string, body?: unknown, idempotencyKey?: string): Promise<unknown> {

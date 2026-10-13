@@ -5,7 +5,7 @@ import { assertDelegate, assertWithdrawBeforeApproval, deskForCurrency, foldVote
 import { consumeBudget, releaseBudget, reserveBudget, retargetReservation } from './budget';
 import { assertFindingsAllowSubmit, crossesYear, invoiceAgeDays, matchBuyer, matchInvoiceAmount } from './compliance';
 import { applyInstallmentPayment, contractCanClose, transitionContract } from './corporate';
-import { assertNoOverdue, loanStatusAfterBalance, transitionLoan, writeOffLoan } from './loan';
+import { assertNoOverdue, assertWriteOffWithinReport, loanStatusAfterBalance, transitionLoan, writeOffLoan } from './loan';
 import { parseFen } from './money';
 import { subsidyAmount } from './subsidy';
 import { expenseDraftFromTravel } from './travel-draft';
@@ -88,6 +88,7 @@ describe('费控、审批、预算和发票不变量', () => {
 
   it('冲销不超过借款余额，逾期未还不能提交', () => {
     expect(writeOffLoan(fen('500'), fen('200')).toString()).toBe('300');
+    expect(() => assertWriteOffWithinReport(fen('100'), [fen('80'), fen('30')])).toThrow(/不能超过本次报销/);
     expect(() => writeOffLoan(fen('500'), fen('501'))).toThrow(/借款余额/);
     expect(loanStatusAfterBalance(fen('0'))).toBe('settled');
     expect(transitionLoan('approving', 'approve')).toBe('outstanding');
@@ -141,6 +142,15 @@ describe('费控、审批、预算和发票不变量', () => {
       explanation: '报销',
     });
     expect(voucher.lines.map((line) => line.debitYuan)).toEqual(['1.00', '0.00']);
+    const yen = voucherFromPaidReport({
+      reportId: 'r',
+      status: 'paid',
+      paidOn: '2026-10-10',
+      amount: fen('1200'),
+      currency: 'JPY',
+      explanation: '报销',
+    });
+    expect(yen.lines[0]?.debitYuan).toBe('1200');
     expect(voucher.lines.map((line) => line.creditYuan)).toEqual(['0.00', '1.00']);
   });
 

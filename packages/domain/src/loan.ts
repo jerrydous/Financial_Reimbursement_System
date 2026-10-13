@@ -25,6 +25,19 @@ export function transitionLoan(from: LoanStatus, action: LoanAction): LoanStatus
   return found.to;
 }
 
+export function assertWriteOffWithinReport(reportAmount: Fen, writeOffs: readonly Fen[]): void {
+  let total = parseFen('0');
+  for (const amount of writeOffs) {
+    if (compareFen(amount, parseFen('0')) <= 0) {
+      throw new DomainError('WRITE_OFF_EXCEEDS_BALANCE', '冲销金额必须大于 0');
+    }
+    total = (total + amount) as Fen;
+  }
+  if (compareFen(total, reportAmount) > 0) {
+    throw new DomainError('WRITE_OFF_EXCEEDS_BALANCE', '冲销金额不能超过本次报销');
+  }
+}
+
 export function writeOffLoan(balance: Fen, amount: Fen): Fen {
   if (compareFen(amount, parseFen('0')) <= 0) {
     throw new DomainError('WRITE_OFF_EXCEEDS_BALANCE', '冲销金额必须大于 0');
