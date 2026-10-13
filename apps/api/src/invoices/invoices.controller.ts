@@ -3,6 +3,8 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
+  Inject,
   Param,
   Post,
   Query,
@@ -13,7 +15,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { confirmInvoiceSchema, invoiceListSchema, pageQuerySchema } from '@frs/contracts';
+import { confirmInvoiceSchema, invoiceListSchema, ledgerBucketSchema, pageQuerySchema, transferSchema } from '@frs/contracts';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard';
 import { EmployeeService } from '../employee/employee.service';
 import { rethrowAsHttp } from '../expense-reports/http-error';
@@ -23,8 +25,8 @@ import { InvoiceCommands } from './invoice-commands';
 @UseGuards(AuthGuard)
 export class InvoicesController {
   constructor(
-    private readonly employees: EmployeeService,
-    private readonly invoices: InvoiceCommands,
+    @Inject(EmployeeService) private readonly employees: EmployeeService,
+    @Inject(InvoiceCommands) private readonly invoices: InvoiceCommands,
   ) {}
 
   @Get('invoices')
@@ -33,10 +35,14 @@ export class InvoicesController {
     if (!parsed.success) {
       throw new BadRequestException({ code: 'PAGE_INVALID', message: '分页参数不合法' });
     }
+    const bucket = ledgerBucketSchema.safeParse(query.bucket ?? 'unreimbursed');
+    if (!bucket.success) {
+      throw new BadRequestException({ code: 'REQUEST_INVALID', message: '发票分类不合法' });
+    }
     const employee = await this.employees.getOwn(request.claims);
     try {
       return invoiceListSchema.parse(
-        await this.invoices.listOwn(employee.id, parsed.data.page, parsed.data.pageSize),
+        await this.invoices.listOwn(employee.id, parsed.data.page, parsed.data.pageSize, bucket.data),
       );
     } catch (error) {
       if (error instanceof Error && error.message === 'PAGE_TOO_DEEP') {
@@ -74,15 +80,49 @@ export class InvoicesController {
     }
   }
 
-  @Get('invoices/:id/content')
-  async file(@Req() request: AuthenticatedRequest, @Param('id') id: string): Promise<StreamableFile> {
+  @Post('invoices/:id/verify')
+  async verify(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+  ) {
     const employee = await this.employees.getOwn(request.claims);
     try {
-      const stored = await this.invoices.readContent(employee.id, id);
-      return new StreamableFile(stored.body, {
-        type: stored.contentType,
-        disposition: `inline; filename="${stored.filename}"`,
-      });
+      return await this.invoices.verify(employee.id, id, idempotencyKey);
+    } catch (error) {
+      rethrowAsHttp(error);
+    }
+  }
+
+  @Post('invoices/:id/exempt')
+  async exempt(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    const employee = await this.employees.getOwn(request.claims);
+    try {
+      return await this.invoices.classify(employee.id, id, 'exempt');
+    } catch (error) {
+      rethrowAsHttp(error);
+    }
+  }
+
+  @Post('invoices/:id/remove')
+  async remove(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    const employee = await this.employees.getOwn(request.claims);
+    try {
+      return await this.invoices.classify(employee.id, id, 'removed');
+    } catch (error) {
+      rethrowAsHttp(error);
+    }
+  }
+
+  @Post('invoices/:id/transfer')
+  async transfer(@Req() request: AuthenticatedRequest, @Param('id') id: string, @Body() body: unknown) {
+    const parsed = transferSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({ code: 'REQUEST_INVALID', message: '转交对象不合法' });
+    }
+    const employee = await this.employees.getOwn(request.claims);
+    try {
+      return await this.invoices.transfer(employee.id, id, parsed.data.transferToEmployeeId);
     } catch (error) {
       rethrowAsHttp(error);
     }
@@ -93,6 +133,21 @@ export class InvoicesController {
     const employee = await this.employees.getOwn(request.claims);
     try {
       return await this.invoices.presign(employee.id, id);
+    } catch (error) {
+      rethrowAsHttp(error);
+    }
+  }
+
+  @Get('invoices/:id/content')
+  async download(@Req() request: AuthenticatedRequest, @Param('id') id: string): Promise<StreamableFile> {
+    const employee = await this.employees.getOwn(request.claims);
+    try {
+      const file = await this.invoices.readContent(employee.id, id);
+      return new StreamableFile(file.body, {
+        type: file.contentType,
+        disposition: `inline; filename="${file.fileName}"`,
+        length: file.body.byteLength,
+      });
     } catch (error) {
       rethrowAsHttp(error);
     }

@@ -1,13 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { v7 as uuidv7 } from 'uuid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { VerificationTimeout } from '@frs/adapters';
 import { ExpenseReportError } from '@frs/domain';
 import { ExpenseReportCommands } from '../src/expense-reports/expense-report-commands';
 import { InvoiceCommands } from '../src/invoices/invoice-commands';
 import type { PrismaService } from '../src/prisma.service';
+import { migrateDatabase } from './migrate';
 
 function dockerAvailable(): boolean {
   try {
@@ -32,11 +33,7 @@ describe.skipIf(!dockerAvailable())('P1 对私闭环在真实 PostgreSQL 上保�
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
     const databaseUrl = container.getConnectionUri();
-    execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
-      cwd: path.join(__dirname, '..'),
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-      stdio: 'inherit',
-    });
+    migrateDatabase(databaseUrl);
     prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     const workflows = {
       startApproval: async () => undefined,
@@ -46,7 +43,7 @@ describe.skipIf(!dockerAvailable())('P1 对私闭环在真实 PostgreSQL 上保�
     invoices = new InvoiceCommands(prisma as unknown as PrismaService, {
       putObject: async () => undefined,
       presignRead: async () => 'http://127.0.0.1/invoice',
-      getObject: async () => ({ body: new Uint8Array(), contentType: 'application/pdf' }),
+      getObject: async () => new Uint8Array(),
     });
     await prisma.company.create({ data: { id: companyId, name: '示例公司', taxId: '91330100EXAMPLE001' } });
     await prisma.employee.create({
@@ -141,5 +138,73 @@ describe.skipIf(!dockerAvailable())('P1 对私闭环在真实 PostgreSQL 上保�
     await expect(
       prisma.auditEvent.update({ where: { id: audit.id }, data: { action: 'tamper' } }),
     ).rejects.toThrow(/DOCUMENT_APPEND_ONLY/);
+  });
+
+  it('查验超时保持未验真，重试成功后仍只有一张发票', async () => {
+    const uploaded = await invoices.upload(ownerId, { body: Buffer.from('invoice-verify'), contentType: 'application/pdf' });
+    const confirmed = await invoices.confirm(ownerId, uploaded.id, {
+      invoiceCode: '011',
+      invoiceNumber: '30001',
+      amountFen: '3000',
+      category: 'meal',
+      merchant: '示例商家',
+    });
+    const before = await prisma.invoice.count();
+    let calls = 0;
+    const verifying = new InvoiceCommands(
+      prisma as unknown as PrismaService,
+      { putObject: async () => undefined, presignRead: async () => 'http://127.0.0.1/invoice', getObject: async () => new Uint8Array() },
+      { recognize: async () => null },
+      {
+        verify: async () => {
+          calls += 1;
+          if (calls === 1) {
+            throw new VerificationTimeout();
+          }
+          return { status: 'verified', buyerName: '示例公司', buyerTaxId: '91330100EXAMPLE001', message: '' };
+        },
+      },
+    );
+    await expect(verifying.verify(ownerId, confirmed.id, 'verify-1')).rejects.toThrow(/未验真/);
+    expect((await prisma.invoice.findUniqueOrThrow({ where: { id: confirmed.id } })).verificationStatus).toBe('unverified');
+    expect(await prisma.invoice.count()).toBe(before);
+    const passed = await verifying.verify(ownerId, confirmed.id, 'verify-2');
+    expect(passed.verificationStatus).toBe('verified');
+    const replay = await verifying.verify(ownerId, confirmed.id, 'verify-2');
+    expect(replay.verificationStatus).toBe('verified');
+    expect(calls).toBe(2);
+    expect(await prisma.invoice.count()).toBe(before);
+  });
+
+  it('并发提交不能把同一预算行冻结成负数', async () => {
+    const departmentId = uuidv7();
+    const projectId = uuidv7();
+    const subjectId = uuidv7();
+    const budgetLineId = uuidv7();
+    await prisma.department.create({ data: { id: departmentId, name: '研发' } });
+    await prisma.project.create({ data: { id: projectId, name: '项目', code: 'P' } });
+    await prisma.budgetSubject.create({ data: { id: subjectId, name: '差旅', code: 'T' } });
+    await prisma.budgetLine.create({
+      data: {
+        id: budgetLineId,
+        departmentId,
+        projectId,
+        subjectId,
+        period: '2026-10',
+        amountFen: 5000n,
+      },
+    });
+    const leftInvoice = await confirmedInvoice('budget-left', '30002');
+    const rightInvoice = await confirmedInvoice('budget-right', '30003');
+    const left = await reports.createDraft(ownerId, [leftInvoice], 'budget-create-1', { budgetLineId });
+    const right = await reports.createDraft(ownerId, [rightInvoice], 'budget-create-2', { budgetLineId });
+    const results = await Promise.allSettled([
+      reports.submit(ownerId, left.id, 'budget-submit-1'),
+      reports.submit(ownerId, right.id, 'budget-submit-2'),
+    ]);
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const line = await prisma.budgetLine.findUniqueOrThrow({ where: { id: budgetLineId } });
+    expect(line.reservedFen).toBe(3000n);
+    expect(line.reservedFen + line.consumedFen <= line.amountFen).toBe(true);
   });
 });

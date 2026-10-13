@@ -2,6 +2,7 @@
 import {
   CreateBucketCommand,
   GetObjectCommand,
+  PutBucketCorsCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -67,10 +68,53 @@ function missingBucket(error: unknown): boolean {
 }
 
 export class S3InvoiceStorage {
+  private corsReady: Promise<void> | null = null;
+
   constructor(
     private readonly client: S3Client,
     private readonly bucket: string,
   ) {}
+
+  /** 浏览器里的 PDF 查看器会跨域读取分段响应，必须暴露 Content-Range。 */
+  ensureBrowserRead(): Promise<void> {
+    if (!this.corsReady) {
+      this.corsReady = this.applyBrowserCors().catch((error: unknown) => {
+        this.corsReady = null;
+        throw error;
+      });
+    }
+    return this.corsReady;
+  }
+
+  private async applyBrowserCors(): Promise<void> {
+    const command = new PutBucketCorsCommand({
+      Bucket: this.bucket,
+      CORSConfiguration: {
+        CORSRules: [
+          {
+            AllowedOrigins: ['*'],
+            AllowedMethods: ['GET', 'HEAD'],
+            AllowedHeaders: ['*'],
+            ExposeHeaders: ['Accept-Ranges', 'Content-Range', 'Content-Length', 'Content-Type', 'ETag'],
+            MaxAgeSeconds: 3000,
+          },
+        ],
+      },
+    });
+    await callWithRetry(async () => {
+      try {
+        await this.client.send(command, { abortSignal: AbortSignal.timeout(OBJECT_STORAGE_TIMEOUT_MS) });
+      } catch (error) {
+        if (!missingBucket(error)) {
+          throw error;
+        }
+        await this.client.send(new CreateBucketCommand({ Bucket: this.bucket }), {
+          abortSignal: AbortSignal.timeout(OBJECT_STORAGE_TIMEOUT_MS),
+        });
+        await this.client.send(command, { abortSignal: AbortSignal.timeout(OBJECT_STORAGE_TIMEOUT_MS) });
+      }
+    });
+  }
 
   async putObject(input: { objectKey: string; body: Uint8Array; contentType: string }): Promise<void> {
     const command = new PutObjectCommand({
@@ -94,24 +138,28 @@ export class S3InvoiceStorage {
     });
   }
 
-  async presignRead(objectKey: string): Promise<string> {
-    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }), {
-      expiresIn: PRESIGN_SECONDS,
-    });
+  async presignRead(objectKey: string, file?: { contentType: string; fileName: string }): Promise<string> {
+    await this.ensureBrowserRead().catch(() => undefined);
+    return getSignedUrl(
+      this.client,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: objectKey,
+        ResponseContentType: file?.contentType,
+        ResponseContentDisposition: file ? `inline; filename="${file.fileName}"` : undefined,
+      }),
+      { expiresIn: PRESIGN_SECONDS },
+    );
   }
 
-  async getObject(objectKey: string): Promise<{ body: Uint8Array; contentType: string }> {
-    const result = await callWithRetry(() =>
-      this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: objectKey }), {
-        abortSignal: AbortSignal.timeout(OBJECT_STORAGE_TIMEOUT_MS),
-      }),
-    );
-    if (!result.Body) {
-      throw new Error('OBJECT_EMPTY');
-    }
-    return {
-      body: await result.Body.transformToByteArray(),
-      contentType: result.ContentType ?? 'application/octet-stream',
-    };
+  async getObject(objectKey: string): Promise<Uint8Array> {
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: objectKey });
+    return callWithRetry(async () => {
+      const response = await this.client.send(command, { abortSignal: AbortSignal.timeout(OBJECT_STORAGE_TIMEOUT_MS) });
+      if (!response.Body) {
+        throw new Error('发票影像是空的');
+      }
+      return response.Body.transformToByteArray();
+    });
   }
 }

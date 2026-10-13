@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "frs",
+      "credentials": [
+        {
+          "accessKey": "frs",
+          "secretKey": "frs-dev-secret"
+        }
+      ],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}

@@ -29,8 +29,17 @@ async function expenseApproval(input) {
     transferToEmployeeId: null,
     idempotencyKey: null,
   });
+  let reminded = false;
   while (!terminal.has(current.status)) {
-    await condition(() => pending.length > 0);
+    const arrived = reminded
+      ? await condition(() => pending.length > 0)
+      : await condition(() => pending.length > 0, '48 hours');
+    if (!arrived) {
+      reminded = true;
+      await activities.remindExpenseApprover({ reportId: input.reportId });
+      continue;
+    }
+    reminded = false;
     const decision = pending.shift();
     current = await activities.applyExpenseDecision({
       reportId: input.reportId,
@@ -45,6 +54,19 @@ async function expenseApproval(input) {
 }
 
 exports.expenseApproval = expenseApproval;
+
+async function documentReminder(input) {
+  const pending = [];
+  setHandler(decisionSignal, (decision) => {
+    pending.push(decision);
+  });
+  const arrived = await condition(() => pending.length > 0, '48 hours');
+  if (!arrived) {
+    await activities.remindDocument({ documentId: input.documentId, kind: input.kind });
+  }
+}
+
+exports.documentReminder = documentReminder;
 exports.workerPing = async function workerPing() {
   return 'ok';
 };

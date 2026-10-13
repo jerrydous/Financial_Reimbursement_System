@@ -4,13 +4,21 @@ import { v7 as uuidv7 } from 'uuid';
 import { currencyCodeSchema, expenseCategorySchema, pageOffset, type InvoiceList, type InvoiceView } from '@frs/contracts';
 import {
   ExpenseReportError,
+  assertLedgerOpen,
+  assertVerificationStatus,
   assertVerificationUnverified,
-  canReadDocument,
   confirmRecognition,
-  isReviewRecordAction,
+  draftFromVatPairs,
+  reviewRecordActions,
+  fenToYuanText,
+  normalizeIdempotencyKey,
   parseFen,
+  verificationFromOfficial,
+  type LedgerBucket,
   type RecognitionStatus,
+  type VerificationDecision,
 } from '@frs/domain';
+import { VerificationNotConfigured, VerificationTimeout } from '@frs/adapters';
 import { logger } from '../logging';
 import { PrismaService } from '../prisma.service';
 import { isUniqueViolation } from '../expense-reports/http-error';
@@ -19,8 +27,12 @@ const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'application/pdf']);
 
 export interface InvoiceFileStore {
   putObject(input: { objectKey: string; body: Uint8Array; contentType: string }): Promise<void>;
-  presignRead(objectKey: string): Promise<string>;
-  getObject(objectKey: string): Promise<{ body: Uint8Array; contentType: string }>;
+  presignRead(objectKey: string, file?: { contentType: string; fileName: string }): Promise<string>;
+  getObject(objectKey: string): Promise<Uint8Array>;
+}
+
+export interface InvoiceOcrPort {
+  recognize(file: { body: Buffer; contentType: string }): Promise<{ pairs: { name: string; value: string }[]; requestId: string } | null>;
 }
 
 @Injectable()
@@ -28,6 +40,24 @@ export class InvoiceCommands {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: InvoiceFileStore,
+    private readonly ocr: InvoiceOcrPort = { recognize: async () => null },
+    private readonly verifier: {
+      verify(input: {
+        invoiceCode: string;
+        invoiceNumber: string;
+        invoiceDate: string;
+        amountYuan?: string;
+      }): Promise<VerificationDecision>;
+    } = {
+      async verify() {
+        throw new VerificationNotConfigured();
+      },
+    },
+    private readonly queue: { enqueue(invoiceId: string, idempotencyKey: string): Promise<void> } = {
+      async enqueue() {
+        return undefined;
+      },
+    },
   ) {}
 
   async upload(ownerEmployeeId: string, file: { body: Buffer; contentType: string }): Promise<InvoiceView> {
@@ -35,17 +65,37 @@ export class InvoiceCommands {
     if (!contentType) {
       throw new ExpenseReportError('FILE_TYPE_UNSUPPORTED', '只接受 jpg、png 或 pdf');
     }
+    const storedFile = { body: file.body, contentType };
     const fileSha256 = createHash('sha256').update(file.body).digest('hex');
     const existing = await this.prisma.invoice.findFirst({
       where: { tenantId: 'default', ownerEmployeeId, fileSha256 },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
     });
+    if (existing?.recognitionStatus === 'pending_confirmation' && existing.binding === 'released') {
+      const recognized = await this.recognizeDraft(storedFile);
+      const updated = await this.prisma.invoice.update({
+        where: { id: existing.id },
+        data: {
+          invoiceCode: recognized.draft.invoiceCode || existing.invoiceCode,
+          invoiceNumber: recognized.draft.invoiceNumber || existing.invoiceNumber,
+          amountFen: recognized.draft.amountFen === null ? existing.amountFen : BigInt(recognized.draft.amountFen),
+          sellerName: recognized.draft.sellerName || existing.sellerName,
+          invoiceDate: recognized.draft.invoiceDate || existing.invoiceDate,
+          contentType: storedFile.contentType,
+          ocrStatus: recognized.status,
+          ocrMessage: recognized.message,
+          ocrRequestId: recognized.requestId,
+        },
+      });
+      return toInvoiceView(updated);
+    }
     if (existing) {
       return { ...toInvoiceView(existing), reused: true };
     }
     const id = uuidv7();
     const objectKey = `invoices/default/${id}`;
-    await this.storage.putObject({ objectKey, body: file.body, contentType });
+    await this.storage.putObject({ objectKey, body: storedFile.body, contentType: storedFile.contentType });
+    const recognized = await this.recognizeDraft(storedFile);
     try {
       const created = await this.prisma.invoice.create({
         data: {
@@ -53,10 +103,20 @@ export class InvoiceCommands {
           ownerEmployeeId,
           objectKey,
           fileSha256,
-          contentType,
+          contentType: storedFile.contentType,
+          invoiceCode: recognized.draft.invoiceCode,
+          invoiceNumber: recognized.draft.invoiceNumber,
+          amountFen: recognized.draft.amountFen === null ? null : BigInt(recognized.draft.amountFen),
+          currency: 'CNY',
+          sellerName: recognized.draft.sellerName,
+          invoiceDate: recognized.draft.invoiceDate,
+          ocrStatus: recognized.status,
+          ocrMessage: recognized.message,
+          ocrRequestId: recognized.requestId,
           recognitionStatus: 'pending_confirmation',
           verificationStatus: 'unverified',
           binding: 'released',
+          ledgerStatus: 'open',
         },
       });
       logger.info({ documentId: id, actorId: ownerEmployeeId, workflowId: null, action: 'upload_invoice' });
@@ -80,10 +140,9 @@ export class InvoiceCommands {
     invoiceId: string,
     input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency?: string; category: string; merchant: string },
   ): Promise<InvoiceView> {
-    const amount = parseFen(input.amountFen);
     const currency = currencyCodeSchema.safeParse(input.currency ?? 'CNY');
     if (!currency.success) {
-      throw new ExpenseReportError('REQUEST_INVALID', '币种不受支持');
+      throw new ExpenseReportError('CURRENCY_MISMATCH', '币种不支持');
     }
     const category = expenseCategorySchema.safeParse(input.category);
     if (!category.success) {
@@ -93,6 +152,7 @@ export class InvoiceCommands {
     if (!merchant || merchant.length > 40) {
       throw new ExpenseReportError('REQUEST_INVALID', '请填写商家或应用');
     }
+    const amount = parseFen(input.amountFen);
     assertVerificationUnverified('unverified');
     if (!input.invoiceNumber.trim()) {
       throw new ExpenseReportError('INVOICE_NUMBER_REQUIRED', '发票号码不能为空');
@@ -128,9 +188,80 @@ export class InvoiceCommands {
     return toInvoiceView(updated);
   }
 
-  async listOwn(ownerEmployeeId: string, page: number, pageSize: number): Promise<InvoiceList> {
+  async verify(ownerEmployeeId: string, invoiceId: string, idempotencyKey: string | undefined): Promise<InvoiceView> {
+    const key = normalizeIdempotencyKey(idempotencyKey);
+    const existing = await this.prisma.invoiceVerificationAttempt.findUnique({
+      where: { tenantId_idempotencyKey: { tenantId: 'default', idempotencyKey: key } },
+    });
+    if (existing && existing.status !== 'pending') {
+      const stored = await this.prisma.invoice.findUnique({ where: { id: existing.invoiceId } });
+      if (!stored || stored.ownerEmployeeId !== ownerEmployeeId) {
+        throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查看这次查验');
+      }
+      return toInvoiceView(stored);
+    }
+    const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    if (!invoice) {
+      throw new ExpenseReportError('INVOICE_NOT_FOUND', '发票不存在');
+    }
+    if (invoice.ownerEmployeeId !== ownerEmployeeId) {
+      throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查验别人的发票');
+    }
+    if (invoice.recognitionStatus !== 'confirmed' || !invoice.invoiceNumber) {
+      throw new ExpenseReportError('INVOICE_NOT_CONFIRMED', '发票还没经人工确认');
+    }
+    const beforeCount = await this.prisma.invoice.count({ where: { ownerEmployeeId } });
+    let decision: VerificationDecision;
+    try {
+      decision = await this.verifier.verify({
+        invoiceCode: invoice.invoiceCode,
+        invoiceNumber: invoice.invoiceNumber,
+        invoiceDate: invoice.invoiceDate,
+        amountYuan: invoice.amountFen === null ? undefined : fenToYuanText(parseFen(invoice.amountFen.toString())),
+      });
+    } catch (error) {
+      if (error instanceof VerificationNotConfigured || (error instanceof Error && error.name === 'VerificationNotConfigured')) {
+        throw new ExpenseReportError('VERIFICATION_NOT_CONFIGURED', '未配置查验服务，发票保持未验真');
+      }
+      if (error instanceof VerificationTimeout || (error instanceof Error && error.name === 'VerificationTimeout')) {
+        await this.saveAttempt(invoice.id, key, 'pending', '查验超时');
+        await this.queue.enqueue(invoice.id, key).catch(() => undefined);
+        throw new ExpenseReportError('VERIFICATION_TIMEOUT', '查验超时，已安排重试，发票仍是未验真');
+      }
+      throw error;
+    }
+    const confirmed = verificationFromOfficial(
+      decision.status === 'verified'
+        ? { invoiceNumber: invoice.invoiceNumber, buyerName: decision.buyerName, buyerTaxId: decision.buyerTaxId }
+        : null,
+      invoice.invoiceNumber,
+    );
+    const updated = await this.prisma.invoice.update({
+      where: { id: invoice.id },
+      data: {
+        verificationStatus: confirmed.status,
+        buyerName: confirmed.buyerName || invoice.buyerName,
+        buyerTaxId: confirmed.buyerTaxId || invoice.buyerTaxId,
+      },
+    });
+    await this.saveAttempt(invoice.id, key, confirmed.status, confirmed.message);
+    if ((await this.prisma.invoice.count({ where: { ownerEmployeeId } })) !== beforeCount) {
+      throw new ExpenseReportError('INVOICE_ALREADY_BOUND', '查验不能新增发票');
+    }
+    return toInvoiceView(updated);
+  }
+
+  private async saveAttempt(invoiceId: string, idempotencyKey: string, status: string, message: string): Promise<void> {
+    await this.prisma.invoiceVerificationAttempt.upsert({
+      where: { tenantId_idempotencyKey: { tenantId: 'default', idempotencyKey } },
+      create: { id: uuidv7(), invoiceId, idempotencyKey, status, message },
+      update: { status, message },
+    });
+  }
+
+  async listOwn(ownerEmployeeId: string, page: number, pageSize: number, bucket: LedgerBucket = 'unreimbursed'): Promise<InvoiceList> {
     const skip = pageOffset(page, pageSize);
-    const where = { ownerEmployeeId };
+    const where = ledgerWhere(ownerEmployeeId, bucket);
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.invoice.count({ where }),
       this.prisma.invoice.findMany({
@@ -149,31 +280,25 @@ export class InvoiceCommands {
   }
 
   async presign(actorId: string, invoiceId: string): Promise<{ url: string; expiresInSeconds: number }> {
-    const invoice = await this.requireReadable(actorId, invoiceId);
-    return { url: await this.storage.presignRead(invoice.objectKey), expiresInSeconds: 60 };
-  }
-
-  async readContent(
-    actorId: string,
-    invoiceId: string,
-  ): Promise<{ body: Uint8Array; contentType: string; filename: string }> {
-    const invoice = await this.requireReadable(actorId, invoiceId);
-    let stored: { body: Uint8Array; contentType: string };
-    try {
-      stored = await this.storage.getObject(invoice.objectKey);
-    } catch {
-      logger.info({ documentId: invoiceId, actorId, workflowId: null, action: 'read_invoice_failed' });
-      throw new ExpenseReportError('FILE_UNAVAILABLE', '发票影像暂时读不出来，请稍后再试');
-    }
-    const filename = (invoice.invoiceNumber || invoice.id).replace(/[^\w.-]+/g, '_');
+    const invoice = await this.readableInvoice(actorId, invoiceId);
+    const fileName = invoiceFileName(invoice.contentType);
     return {
-      body: stored.body,
-      contentType: invoice.contentType || stored.contentType || 'application/octet-stream',
-      filename,
+      url: await this.storage.presignRead(invoice.objectKey, { contentType: invoice.contentType, fileName }),
+      expiresInSeconds: 60,
     };
   }
 
-  private async requireReadable(actorId: string, invoiceId: string) {
+  async readContent(actorId: string, invoiceId: string): Promise<{ body: Uint8Array; contentType: string; fileName: string }> {
+    const invoice = await this.readableInvoice(actorId, invoiceId);
+    return {
+      body: await this.storage.getObject(invoice.objectKey),
+      contentType: invoice.contentType,
+      fileName: invoiceFileName(invoice.contentType),
+    };
+  }
+
+  /** 驳回、撤回会清掉发票上的报销单号，影像仍挂在单据明细上。能看单据的人要能看影像。 */
+  private async readableInvoice(actorId: string, invoiceId: string) {
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
     if (!invoice) {
       throw new ExpenseReportError('INVOICE_NOT_FOUND', '发票不存在');
@@ -182,37 +307,154 @@ export class InvoiceCommands {
       return invoice;
     }
     const lines = await this.prisma.expenseLine.findMany({
-      where: { invoiceId },
+      where: { invoiceId: invoice.id },
       select: { reportId: true },
     });
-    const reportIds = [...new Set([invoice.expenseReportId, ...lines.map((line) => line.reportId)].filter((id) => id !== null))];
-    const reports = reportIds.length === 0
-      ? []
-      : await this.prisma.expenseReport.findMany({
-          where: { id: { in: reportIds } },
-          select: {
-            employeeId: true,
-            accesses: { where: { actorId }, select: { actorId: true, action: true, revokedAt: true } },
-            auditEvents: { where: { actorId }, select: { action: true } },
-          },
-        });
-    const allowed = reports.some((report) =>
-      canReadDocument({
-        actorId,
-        ownerId: report.employeeId,
-        grants: report.accesses.map((grant) => ({
-          actorId: grant.actorId,
-          action: grant.action,
-          revokedAt: grant.revokedAt?.toISOString() ?? null,
-        })),
-        actedReview: report.auditEvents.some((event) => isReviewRecordAction(event.action)),
-      }),
-    );
-    if (!allowed) {
-      throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查看别人的发票影像');
+    const reportIds = [...new Set(lines.map((line) => line.reportId))];
+    if (invoice.expenseReportId && !reportIds.includes(invoice.expenseReportId)) {
+      reportIds.push(invoice.expenseReportId);
+    }
+    const readable =
+      reportIds.length === 0
+        ? null
+        : await this.prisma.documentAccess.findFirst({
+            where: {
+              actorId,
+              action: 'read',
+              revokedAt: null,
+              OR: reportIds.map((reportId) => ({ documentId: reportId, objectKey: reportId })),
+            },
+          });
+    if (!readable) {
+      const reviewed =
+        reportIds.length === 0
+          ? null
+          : await this.prisma.auditEvent.findFirst({
+              where: { actorId, documentId: { in: reportIds }, action: { in: [...reviewRecordActions] } },
+            });
+      if (!reviewed) {
+        throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查看别人的发票影像');
+      }
     }
     return invoice;
   }
+
+  async classify(ownerEmployeeId: string, invoiceId: string, next: 'exempt' | 'removed'): Promise<InvoiceView> {
+    const invoice = await this.editableInvoice(ownerEmployeeId, invoiceId);
+    const updated = await this.prisma.invoice.update({
+      where: { id: invoice.id },
+      data: { ledgerStatus: next },
+    });
+    logger.info({ documentId: invoice.id, actorId: ownerEmployeeId, workflowId: null, action: next === 'exempt' ? 'exempt_invoice' : 'remove_invoice' });
+    return toInvoiceView(updated);
+  }
+
+  async transfer(ownerEmployeeId: string, invoiceId: string, toEmployeeId: string): Promise<InvoiceView> {
+    if (toEmployeeId === ownerEmployeeId) {
+      throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '不能把发票转交给自己');
+    }
+    const target = await this.prisma.employee.findUnique({ where: { id: toEmployeeId } });
+    const source = await this.editableInvoice(ownerEmployeeId, invoiceId);
+    if (!target || target.companyId !== (await this.prisma.employee.findUnique({ where: { id: ownerEmployeeId } }))?.companyId) {
+      throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '转交对象必须是同一公司的同事');
+    }
+    const copyId = uuidv7();
+    await this.prisma.$transaction([
+      this.prisma.invoice.update({
+        where: { id: source.id },
+        data: { ledgerStatus: 'transferred', transferredToId: toEmployeeId },
+      }),
+      this.prisma.invoice.create({
+        data: {
+          id: copyId,
+          ownerEmployeeId: toEmployeeId,
+          objectKey: source.objectKey,
+          fileSha256: source.fileSha256,
+          contentType: source.contentType,
+          invoiceCode: source.invoiceCode,
+          invoiceNumber: source.invoiceNumber,
+          amountFen: source.amountFen,
+          currency: source.currency,
+          category: source.category,
+          merchant: source.merchant,
+          sellerName: source.sellerName,
+          invoiceDate: source.invoiceDate,
+          ocrStatus: source.ocrStatus,
+          ocrMessage: source.ocrMessage,
+          ocrRequestId: source.ocrRequestId,
+          recognitionStatus: source.recognitionStatus,
+          verificationStatus: 'unverified',
+          binding: 'released',
+          ledgerStatus: 'open',
+        },
+      }),
+    ]);
+    logger.info({ documentId: source.id, actorId: ownerEmployeeId, workflowId: null, action: 'transfer_invoice' });
+    const updated = await this.prisma.invoice.findUniqueOrThrow({ where: { id: source.id } });
+    return toInvoiceView(updated);
+  }
+
+  private async editableInvoice(ownerEmployeeId: string, invoiceId: string) {
+    const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
+    if (!invoice) {
+      throw new ExpenseReportError('INVOICE_NOT_FOUND', '发票不存在');
+    }
+    if (invoice.ownerEmployeeId !== ownerEmployeeId) {
+      throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能分类别人的发票');
+    }
+    if (invoice.binding === 'active') {
+      throw new ExpenseReportError('INVOICE_ALREADY_BOUND', '已经进入报销单的发票不能再改分类');
+    }
+    assertLedgerOpen(invoice.ledgerStatus);
+    return invoice;
+  }
+
+  private async recognizeDraft(file: { body: Buffer; contentType: string }): Promise<{
+    draft: { invoiceCode: string; invoiceNumber: string; amountFen: string | null; sellerName: string; invoiceDate: string };
+    status: 'skipped' | 'recognized' | 'failed';
+    message: string;
+    requestId: string;
+  }> {
+    const empty = { invoiceCode: '', invoiceNumber: '', amountFen: null, sellerName: '', invoiceDate: '' };
+    try {
+      const recognized = await this.ocr.recognize(file);
+      if (!recognized) {
+        return { draft: empty, status: 'skipped', message: '未配置识票服务，请手工填写', requestId: '' };
+      }
+      const draft = draftFromVatPairs(recognized.pairs);
+      if (!draft.invoiceNumber && !draft.amountFen) {
+        return { draft, status: 'failed', message: '没有识别出发票号码或金额，请手工填写', requestId: recognized.requestId };
+      }
+      return { draft, status: 'recognized', message: '', requestId: recognized.requestId };
+    } catch (error) {
+      return {
+        draft: empty,
+        status: 'failed',
+        message: error instanceof Error ? error.message : '识票失败，请手工填写',
+        requestId: '',
+      };
+    }
+  }
+}
+
+function ledgerWhere(ownerEmployeeId: string, bucket: LedgerBucket) {
+  if (bucket === 'reimbursed') {
+    return { ownerEmployeeId, binding: 'active' };
+  }
+  if (bucket === 'unreimbursed') {
+    return { ownerEmployeeId, binding: 'released', ledgerStatus: 'open' };
+  }
+  return { ownerEmployeeId, binding: 'released', ledgerStatus: bucket };
+}
+
+function invoiceFileName(contentType: string): string {
+  if (contentType === 'application/pdf') {
+    return 'invoice.pdf';
+  }
+  if (contentType === 'image/png') {
+    return 'invoice.png';
+  }
+  return 'invoice.jpg';
 }
 
 function toInvoiceView(invoice: {
@@ -223,25 +465,37 @@ function toInvoiceView(invoice: {
   currency: string;
   category: string | null;
   merchant: string | null;
+  sellerName: string;
+  invoiceDate: string;
+  buyerName: string;
+  buyerTaxId: string;
+  invoiceType: string;
+  ledgerStatus: string;
+  ocrStatus: string;
+  ocrMessage: string;
   recognitionStatus: string;
   verificationStatus: string;
   binding: string;
 }): InvoiceView {
-  assertVerificationUnverified(invoice.verificationStatus);
-  const currency = currencyCodeSchema.safeParse(invoice.currency);
-  if (!currency.success) {
-    throw new ExpenseReportError('REQUEST_INVALID', '币种不受支持');
-  }
+  const verificationStatus = assertVerificationStatus(invoice.verificationStatus);
   return {
     id: invoice.id,
     invoiceCode: invoice.invoiceCode,
     invoiceNumber: invoice.invoiceNumber,
     amountFen: invoice.amountFen?.toString() ?? null,
-    currency: currency.data,
-    category: expenseCategorySchema.safeParse(invoice.category).success ? expenseCategorySchema.parse(invoice.category) : null,
+    currency: currencyCodeSchema.parse(invoice.currency),
+    category: expenseCategorySchema.safeParse(invoice.category).data ?? null,
     merchant: invoice.merchant?.trim() ? invoice.merchant.trim() : null,
+    sellerName: invoice.sellerName,
+    invoiceDate: invoice.invoiceDate,
+    ledgerStatus: invoice.ledgerStatus as InvoiceView['ledgerStatus'],
+    ocrStatus: invoice.ocrStatus as InvoiceView['ocrStatus'],
+    ocrMessage: invoice.ocrMessage,
     recognitionStatus: invoice.recognitionStatus as InvoiceView['recognitionStatus'],
-    verificationStatus: 'unverified',
+    verificationStatus,
+    buyerName: invoice.buyerName,
+    buyerTaxId: invoice.buyerTaxId,
+    invoiceType: invoice.invoiceType,
     binding: invoice.binding as InvoiceView['binding'],
   };
 }

@@ -1,11 +1,31 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { expenseReportListSchema, pageOffset, settledSummarySchema, type ExpenseReportList, type SettledSummary } from '@frs/contracts';
 import { parseFen, reviewRecordActions, summarizeSettled } from '@frs/domain';
 import { PrismaService } from '../prisma.service';
 
+const handledActions = ['approve', 'reject', 'transfer', 'skip_to_finance', 'finance_adjust', 'finance_approve', 'pay_success', 'pay_fail'];
+
 @Injectable()
 export class ExpenseReportsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async listHandled(actorId: string, page: number, pageSize: number): Promise<ExpenseReportList> {
+    const skip = pageOffset(page, pageSize);
+    const where = {
+      auditEvents: { some: { actorId, action: { in: handledActions } } },
+      accesses: { some: { actorId, action: 'read', revokedAt: null } },
+    };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.expenseReport.count({ where }),
+      this.prisma.expenseReport.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+    ]);
+    return this.toList(rows, page, pageSize, total);
+  }
 
   async listVisible(
     actorId: string,
@@ -27,18 +47,7 @@ export class ExpenseReportsService {
         take: pageSize,
       }),
     ]);
-    return expenseReportListSchema.parse({
-      items: rows.map((row) => ({
-        id: row.id,
-        status: row.status,
-        amountFen: row.amountFen.toString(),
-        currency: row.currency,
-        createdAt: row.createdAt.toISOString(),
-      })),
-      page,
-      pageSize,
-      total,
-    });
+    return this.toList(rows, page, pageSize, total);
   }
 
   async settledSummary(employeeId: string): Promise<SettledSummary> {
@@ -82,18 +91,7 @@ export class ExpenseReportsService {
         take: pageSize,
       }),
     ]);
-    return expenseReportListSchema.parse({
-      items: rows.map((row) => ({
-        id: row.id,
-        status: row.status,
-        amountFen: row.amountFen.toString(),
-        currency: row.currency,
-        createdAt: row.createdAt.toISOString(),
-      })),
-      page,
-      pageSize,
-      total,
-    });
+    return this.toList(rows, page, pageSize, total);
   }
 
   async listOwn(employeeId: string, page: number, pageSize: number): Promise<ExpenseReportList> {
@@ -108,6 +106,15 @@ export class ExpenseReportsService {
         take: pageSize,
       }),
     ]);
+    return this.toList(rows, page, pageSize, total);
+  }
+
+  private toList(
+    rows: { id: string; status: string; amountFen: bigint; currency: string; createdAt: Date }[],
+    page: number,
+    pageSize: number,
+    total: number,
+  ): ExpenseReportList {
     return expenseReportListSchema.parse({
       items: rows.map((row) => ({
         id: row.id,

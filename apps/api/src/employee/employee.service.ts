@@ -1,11 +1,11 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import {
   assertCanBindSubject,
   assertSameSubject,
   IdentityError,
   type AccessTokenClaims,
 } from '@frs/domain';
-import { employeeSummarySchema, employeeViewSchema, type EmployeeSummary, type EmployeeView } from '@frs/contracts';
+import { employeeViewSchema, type EmployeeView } from '@frs/contracts';
 import { PrismaService } from '../prisma.service';
 
 const employeeInclude = { company: true } as const;
@@ -22,7 +22,7 @@ type EmployeeRecord = {
 
 @Injectable()
 export class EmployeeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async getOwn(claims: AccessTokenClaims): Promise<EmployeeView> {
     const existing = await this.prisma.employee.findUnique({
@@ -72,19 +72,21 @@ export class EmployeeService {
     return toView(current);
   }
 
-  async listDirectory(): Promise<EmployeeSummary[]> {
+  async listColleagues(actorId: string): Promise<{ id: string; name: string; role: 'employee' | 'manager' | 'finance' | 'cashier' }[]> {
+    const self = await this.prisma.employee.findUnique({ where: { id: actorId } });
+    if (!self) {
+      return [];
+    }
     const rows = await this.prisma.employee.findMany({
-      orderBy: [{ role: 'asc' }, { name: 'asc' }],
-      select: { id: true, username: true, name: true, role: true },
+      where: { companyId: self.companyId, NOT: { id: actorId } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, role: true },
     });
-    return rows.map((row) =>
-      employeeSummarySchema.parse({
-        id: row.id,
-        username: row.username,
-        name: row.name,
-        role: row.role,
-      }),
-    );
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      role: row.role as 'employee' | 'manager' | 'finance' | 'cashier',
+    }));
   }
 }
 

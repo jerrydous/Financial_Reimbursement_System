@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { v7 as uuidv7 } from 'uuid';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ExpenseReportsService } from '../src/expense-reports/expense-reports.service';
 import type { PrismaService } from '../src/prisma.service';
+import { migrateDatabase } from './migrate';
 
 function dockerAvailable(): boolean {
   try {
@@ -26,11 +26,7 @@ describe.skipIf(!dockerAvailable())('报销列表在真实 PostgreSQL 上按员�
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').start();
     const databaseUrl = container.getConnectionUri();
-    execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
-      cwd: path.join(__dirname, '..'),
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-      stdio: 'inherit',
-    });
+    migrateDatabase(databaseUrl);
     prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     await prisma.company.create({
       data: { id: companyId, name: '示例公司', taxId: '91330100EXAMPLE001' },
