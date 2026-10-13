@@ -9,9 +9,9 @@ import {
   crossesYear,
   invoiceAgeDays,
   loanStatusAfterBalance,
+  deskForCurrency,
   matchBuyer,
   matchInvoiceAmount,
-  nextDesk,
   occupyQuota,
   parseFen,
   releaseBudget,
@@ -51,9 +51,9 @@ export async function publishedPolicy(tx: Tx): Promise<{ rules: object[]; skipBe
   };
 }
 
-export async function deskForAmount(tx: Tx, amount: Fen): Promise<'manager' | 'finance'> {
+export async function deskForAmount(tx: Tx, amount: Fen, currency: string): Promise<'manager' | 'finance'> {
   const policy = await publishedPolicy(tx);
-  return nextDesk(amount, policy.skipBelow);
+  return deskForCurrency(currency, amount, policy.skipBelow);
 }
 
 export async function enforceSubmitControls(
@@ -107,8 +107,11 @@ export async function enforceSubmitControls(
   if (input.applicationId) {
     await tx.$queryRaw`SELECT id FROM applications WHERE id = ${input.applicationId} FOR UPDATE`;
     const application = await tx.application.findUnique({ where: { id: input.applicationId } });
-    if (!application || application.employeeId !== input.employeeId || application.status !== 'approved') {
+    if (!application || application.employeeId !== input.employeeId || (application.status !== 'approved' && application.status !== 'closed')) {
       throw new DomainError('QUOTA_EXCEEDED', '只能占用自己已批准的申请');
+    }
+    if (application.status === 'closed') {
+      throw new DomainError('QUOTA_EXCEEDED', '报销金额超过申请剩余额度');
     }
     const consumed = occupyQuota(
       parseFen(application.amountFen.toString()),

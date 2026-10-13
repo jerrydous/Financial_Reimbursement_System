@@ -41,15 +41,19 @@ async function expenseApproval(input) {
     }
     reminded = false;
     const decision = pending.shift();
-    current = await activities.applyExpenseDecision({
-      reportId: input.reportId,
-      action: decision.action,
-      actorId: decision.actorId,
-      workflowId: `expense-approval-${input.reportId}`,
-      approvedAmountFen: decision.approvedAmountFen ?? null,
-      transferToEmployeeId: decision.transferToEmployeeId ?? null,
-      idempotencyKey: decision.idempotencyKey ?? null,
-    });
+    if (decision.alreadyApplied && decision.status) {
+      current = { status: decision.status };
+    } else {
+      current = await activities.applyExpenseDecision({
+        reportId: input.reportId,
+        action: decision.action,
+        actorId: decision.actorId,
+        workflowId: `expense-approval-${input.reportId}`,
+        approvedAmountFen: decision.approvedAmountFen ?? null,
+        transferToEmployeeId: decision.transferToEmployeeId ?? null,
+        idempotencyKey: decision.idempotencyKey ?? null,
+      });
+    }
   }
 }
 

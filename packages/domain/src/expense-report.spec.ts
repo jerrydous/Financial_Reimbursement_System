@@ -50,6 +50,7 @@ describe('报销单状态机', () => {
   it('财务才能改批准金额，支付成功后金额锁定', () => {
     const approved = applyFinanceAdjustment('finance_review', parseFen('100'), parseFen('80'));
     expect(approved).toBe(80n);
+    expect(() => applyFinanceAdjustment('finance_review', parseFen('100'), parseFen('120'))).toThrow(/不能高于/);
     expect(() => applyFinanceAdjustment('paying', parseFen('80'), parseFen('70'))).toThrow(/不能从待支付/);
     expect(() =>
       actorForAction('paid', 'finance_adjust', { ownerId: 'owner', currentActorId: null }),

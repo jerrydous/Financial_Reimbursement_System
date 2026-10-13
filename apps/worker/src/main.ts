@@ -27,7 +27,7 @@ async function run(): Promise<void> {
   const worker = await Worker.create({
     connection,
     namespace: process.env.TEMPORAL_NAMESPACE ?? 'default',
-    taskQueue: 'expense',
+    taskQueue: process.env.TEMPORAL_TASK_QUEUE?.trim() || 'expense',
     workflowsPath: path.join(__dirname, 'workflows.js'),
     activities,
   });

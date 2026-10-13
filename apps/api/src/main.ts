@@ -5,6 +5,16 @@ import { AppModule } from './app.module';
 import { ApiExceptionFilter } from './http-exception.filter';
 import { requestLog } from './logging';
 
+process.on('unhandledRejection', (reason) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  if (/read image|pixRead|Unknown format/i.test(message)) {
+    console.error(message);
+    return;
+  }
+  console.error(reason);
+  process.exit(1);
+});
+
 async function main(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: ['error', 'warn'] });
   app.use(requestLog);

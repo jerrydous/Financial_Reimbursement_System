@@ -44,6 +44,16 @@ export function assertVerificationUnverified(status: string): void {
   }
 }
 
+/** 未验真可以报销。查验通过后仍可报销。只有验真未通过才拦住。 */
+export function assertVerificationAllowsExpense(status: string): void {
+  if (status === 'failed') {
+    throw new ExpenseReportError('VERIFICATION_NOT_ALLOWED', '验真未通过的发票不能报销');
+  }
+  if (status !== 'unverified' && status !== 'verified') {
+    throw new ExpenseReportError('VERIFICATION_NOT_ALLOWED', '发票验真状态不合法');
+  }
+}
+
 /** 人工确认之前不得入账。有没有识别结果都一样，不能自动过账。 */
 export function assertReadyToAttach(status: RecognitionStatus, amount: Fen | null): Fen {
   if (status !== 'confirmed' || amount === null) {
@@ -82,6 +92,8 @@ export type OcrDraft = {
   invoiceNumber: string;
   amountFen: string | null;
   sellerName: string;
+  buyerName: string;
+  buyerTaxId: string;
   invoiceDate: string;
 };
 
@@ -89,6 +101,8 @@ const VAT_NAME: Record<string, keyof OcrDraft | 'amountWithTax'> = {
   发票代码: 'invoiceCode',
   发票号码: 'invoiceNumber',
   销售方名称: 'sellerName',
+  购买方名称: 'buyerName',
+  购买方税号: 'buyerTaxId',
   开票日期: 'invoiceDate',
   '价税合计(小写)': 'amountWithTax',
   价税合计: 'amountWithTax',
@@ -119,6 +133,8 @@ export function draftFromVatPairs(pairs: readonly VatInvoicePair[]): OcrDraft {
     invoiceNumber: picked.invoiceNumber ?? '',
     amountFen,
     sellerName: picked.sellerName ?? '',
+    buyerName: picked.buyerName ?? '',
+    buyerTaxId: picked.buyerTaxId ?? '',
     invoiceDate: normalizeInvoiceDate(picked.invoiceDate ?? ''),
   };
 }
@@ -154,6 +170,15 @@ export function pairsFromInvoiceText(text: string): VatInvoicePair[] {
   const sellerName = usableSeller(seller?.[1] ?? '') || companyName(source);
   if (sellerName) {
     pairs.push({ name: '销售方名称', value: sellerName });
+  }
+  const buyer = source.match(/购买方[\s\S]{0,160}?名称[:：]\s*([^\n]{2,80})/);
+  const buyerName = usableSeller(buyer?.[1] ?? '');
+  if (buyerName) {
+    pairs.push({ name: '购买方名称', value: buyerName });
+  }
+  const buyerTax = source.match(/购买方[\s\S]{0,220}?纳税人识别号[:：\s]*([0-9A-Za-z]{15,20})/);
+  if (buyerTax?.[1]) {
+    pairs.push({ name: '购买方税号', value: buyerTax[1].toUpperCase() });
   }
   return pairs;
 }

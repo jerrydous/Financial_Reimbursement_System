@@ -13,6 +13,7 @@ import {
   ExpenseReportError,
   applyInstallmentPayment,
   assertDelegate,
+  assertSingleRoleAssignee,
   contractCanClose,
   loanStatusAfterBalance,
   normalizeIdempotencyKey,
@@ -516,13 +517,24 @@ export class DocumentCommands {
       if (action === 'pay_success') {
         await consumeCorporateBudget(tx, id);
       }
-      const finance = action === 'approve' ? await tx.employee.findFirst({ where: { role: 'finance' } }) : null;
-      const cashier = action === 'finance_approve' ? await tx.employee.findFirst({ where: { role: 'cashier' } }) : null;
+      const companyId = row.employee.companyId;
+      const finance =
+        action === 'approve' ? await tx.employee.findMany({ where: { role: 'finance', companyId }, select: { id: true } }) : [];
+      const cashiers =
+        action === 'finance_approve'
+          ? await tx.employee.findMany({ where: { role: 'cashier', companyId }, select: { id: true } })
+          : [];
+      if (action === 'approve') {
+        assertSingleRoleAssignee('finance', finance.length);
+      }
+      if (action === 'finance_approve') {
+        assertSingleRoleAssignee('cashier', cashiers.length);
+      }
       await tx.corporateBill.update({
         where: { id },
         data: {
           status: next,
-          currentActorId: finance?.id ?? cashier?.id ?? null,
+          currentActorId: finance[0]?.id ?? cashiers[0]?.id ?? null,
           version: { increment: 1 },
         },
       });
@@ -578,20 +590,7 @@ export class DocumentCommands {
       if (!isUniqueViolation(error)) {
         throw error;
       }
-      const existing = await this.prisma.travelOrder.findUnique({
-        where: { tenantId_provider_externalId: { tenantId: 'default', provider, externalId: draft.externalId } },
-      });
-      if (!existing) {
-        throw new DomainError('TRAVEL_DUPLICATE', '这张商旅订单已经导入');
-      }
-      return {
-        id: existing.id,
-        externalId: existing.externalId,
-        amountFen: existing.amountFen.toString(),
-        occurredOn: existing.occurredOn,
-        summary: existing.summary,
-        reused: true,
-      };
+      throw new DomainError('TRAVEL_DUPLICATE', '这张商旅订单已经导入');
     }
   }
 
