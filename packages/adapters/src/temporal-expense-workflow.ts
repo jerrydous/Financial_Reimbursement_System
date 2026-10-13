@@ -16,7 +16,13 @@ export type ExpenseDecisionSignal = {
   approvedAmountFen?: string;
   transferToEmployeeId?: string | null;
   idempotencyKey?: string | null;
+  alreadyApplied?: boolean;
+  status?: string;
 };
+
+function taskQueue(): string {
+  return process.env.TEMPORAL_TASK_QUEUE?.trim() || 'expense';
+}
 
 export class TemporalExpenseWorkflow {
   private clientPromise: Promise<Client> | null = null;
@@ -49,7 +55,7 @@ export class TemporalExpenseWorkflow {
     const client = await this.client();
     await withExternalDeadline(
       client.workflow.start('expenseApproval', {
-        taskQueue: 'expense',
+        taskQueue: taskQueue(),
         workflowId: expenseWorkflowId(reportId),
         args: [{ reportId }],
         workflowIdReusePolicy: 'ALLOW_DUPLICATE',
@@ -66,7 +72,7 @@ export class TemporalExpenseWorkflow {
     const client = await this.client();
     await withExternalDeadline(
       client.workflow.start('documentReminder', {
-        taskQueue: 'expense',
+        taskQueue: taskQueue(),
         workflowId: `reminder-${kind}-${documentId}`,
         args: [{ documentId, kind }],
         workflowIdReusePolicy: 'ALLOW_DUPLICATE',

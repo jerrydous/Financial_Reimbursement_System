@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { occupyQuota, releaseQuota, remainingQuota, transitionApplication } from './application';
 import { allocateByWeights } from './allocation';
-import { assertDelegate, assertWithdrawBeforeApproval, foldVotes, mayVote, nextDesk } from './approval-plan';
+import { assertDelegate, assertWithdrawBeforeApproval, deskForCurrency, foldVotes, mayVote, nextDesk } from './approval-plan';
 import { consumeBudget, releaseBudget, reserveBudget, retargetReservation } from './budget';
 import { assertFindingsAllowSubmit, crossesYear, invoiceAgeDays, matchBuyer, matchInvoiceAmount } from './compliance';
 import { applyInstallmentPayment, contractCanClose, transitionContract } from './corporate';
@@ -53,6 +53,9 @@ describe('费控、审批、预算和发票不变量', () => {
     expect(nextDesk(fen('100'), null)).toBe('manager');
     expect(nextDesk(fen('100'), fen('100'))).toBe('finance');
     expect(nextDesk(fen('101'), fen('100'))).toBe('manager');
+    expect(deskForCurrency('CNY', fen('100'), fen('100'))).toBe('finance');
+    expect(deskForCurrency('USD', fen('100'), fen('100'))).toBe('manager');
+    expect(deskForCurrency('JPY', fen('100'), fen('100'))).toBe('manager');
     expect(transitionExpenseReport('submitted', 'skip_to_finance')).toBe('finance_review');
     expect(
       nextActorAfter('skip_to_finance', null, {
