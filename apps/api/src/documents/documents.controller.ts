@@ -136,6 +136,11 @@ export class DocumentsController {
     return this.act(request, (employeeId) => this.documents.decideLoan(employeeId, id, 'reject'));
   }
 
+  @Post('loans/:id/withdraw')
+  withdrawLoan(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.act(request, (employeeId) => this.documents.decideLoan(employeeId, id, 'withdraw'));
+  }
+
   @Post('loans/:id/repayments')
   async repay(
     @Req() request: AuthenticatedRequest,

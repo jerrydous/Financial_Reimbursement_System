@@ -39,6 +39,31 @@ const inboxTabs = [
 
 type ListKind = (typeof documentTabs)[number]['key'] | 'corporate';
 
+function LoanWithdraw({ id, status }: { id: string; status: string }) {
+  const { message } = AntdApp.useApp();
+  const client = useQueryClient();
+  const act = useMutation({
+    mutationFn: async () => {
+      await postJson(`/loans/${id}/withdraw`);
+    },
+    onSuccess: async () => {
+      message.success('已撤回');
+      await client.invalidateQueries({ queryKey: ['documents'] });
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '没有撤回');
+    },
+  });
+  if (status !== 'approving') {
+    return null;
+  }
+  return (
+    <Button size="small" loading={act.isPending} onClick={() => void act.mutateAsync()}>
+      撤回
+    </Button>
+  );
+}
+
 function InboxActions({ kind, id, status }: { kind: 'application' | 'loan' | 'corporate'; id: string; status: string }) {
   const { message } = AntdApp.useApp();
   const client = useQueryClient();
@@ -212,7 +237,14 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
                     ),
                   },
                 ]
-              : []),
+              : !inbox && kind === 'loan'
+                ? [
+                    {
+                      title: '处理',
+                      render: (_value: unknown, row: { id: string; status: string }) => <LoanWithdraw id={row.id} status={row.status} />,
+                    },
+                  ]
+                : []),
           ]}
         />
       ) : (

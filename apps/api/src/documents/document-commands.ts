@@ -143,19 +143,28 @@ export class DocumentCommands {
   }
 
   async submitLoan(employeeId: string, id: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const row = await this.lockLoan(tx, id);
       this.owned(row.employeeId, employeeId);
+      if (!row.employee.managerId) {
+        throw new ExpenseReportError('MANAGER_NOT_ASSIGNED', '员工没有主管，不能提交');
+      }
       const next = transitionLoan(asLoan(row.status), 'submit');
       await tx.loan.update({ where: { id }, data: { status: next, version: { increment: 1 } } });
-      return { id, status: next };
+      return { id, status: next, managerId: row.employee.managerId };
     });
+    await this.remind(id, 'loan', result.managerId ?? '');
+    return { id: result.id, status: result.status };
   }
 
-  async decideLoan(actorId: string, id: string, action: 'approve' | 'reject') {
-    return this.prisma.$transaction(async (tx) => {
+  async decideLoan(actorId: string, id: string, action: 'approve' | 'reject' | 'withdraw') {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const row = await this.lockLoan(tx, id);
-      await this.assertManager(tx, row.employee.managerId, actorId);
+      if (action === 'withdraw') {
+        this.owned(row.employeeId, actorId);
+      } else {
+        await this.assertManager(tx, row.employee.managerId, actorId);
+      }
       const next = transitionLoan(asLoan(row.status), action);
       await tx.loan.update({
         where: { id },
@@ -163,6 +172,8 @@ export class DocumentCommands {
       });
       return { id, status: next };
     });
+    await this.stopRemind(id, 'loan');
+    return updated;
   }
 
   async repay(employeeId: string, loanId: string, amountFen: string, idempotencyKey: string | undefined) {
@@ -424,7 +435,11 @@ export class DocumentCommands {
         where: { tenantId_operation_key: { tenantId: 'default', operation: 'pay_installment', key } },
       });
       if (existing) {
-        return { id };
+        if (existing.documentId !== id) {
+          throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', '这个付款编号已经用于另一期');
+        }
+        const installment = await tx.installment.findUnique({ where: { id } });
+        return { id, status: installment?.status ?? 'pending' };
       }
       await tx.$queryRaw`SELECT id FROM installments WHERE id = ${id} FOR UPDATE`;
       const row = await tx.installment.findUnique({ where: { id }, include: { contract: true } });
@@ -524,6 +539,8 @@ export class DocumentCommands {
       const status = asReport(row.status);
       if (action === 'withdraw') {
         this.owned(row.employeeId, actorId);
+      } else if (action === 'reject' && status === 'finance_review') {
+        await this.assertFinance(actorId, row.employee.companyId);
       } else if (action === 'approve' || action === 'reject') {
         await this.assertManager(tx, row.currentActorId, actorId);
       } else if (action === 'finance_approve') {

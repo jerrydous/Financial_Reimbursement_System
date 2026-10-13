@@ -4,7 +4,7 @@ import { compareFen, parseFen, type Fen } from './money';
 export const loanStatuses = ['draft', 'approving', 'outstanding', 'settled'] as const;
 export type LoanStatus = (typeof loanStatuses)[number];
 
-export const loanActions = ['submit', 'approve', 'reject', 'settle'] as const;
+export const loanActions = ['submit', 'approve', 'reject', 'withdraw', 'settle'] as const;
 export type LoanAction = (typeof loanActions)[number];
 
 type Transition = { from: LoanStatus; action: LoanAction; to: LoanStatus };
@@ -14,6 +14,7 @@ export const loanTransitions: readonly Transition[] = [
   { from: 'draft', action: 'submit', to: 'approving' },
   { from: 'approving', action: 'approve', to: 'outstanding' },
   { from: 'approving', action: 'reject', to: 'draft' },
+  { from: 'approving', action: 'withdraw', to: 'draft' },
   { from: 'outstanding', action: 'settle', to: 'settled' },
 ];
 
