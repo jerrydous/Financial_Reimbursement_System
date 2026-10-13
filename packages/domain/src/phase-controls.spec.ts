@@ -92,6 +92,7 @@ describe('费控、审批、预算和发票不变量', () => {
     expect(() => writeOffLoan(fen('500'), fen('501'))).toThrow(/借款余额/);
     expect(loanStatusAfterBalance(fen('0'))).toBe('settled');
     expect(transitionLoan('approving', 'approve')).toBe('outstanding');
+    expect(transitionLoan('approving', 'withdraw')).toBe('draft');
     expect(() =>
       assertNoOverdue([{ status: 'outstanding', dueOn: '2026-01-01', balance: fen('1') }], '2026-10-10'),
     ).toThrow(/逾期未还/);
