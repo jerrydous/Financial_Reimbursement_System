@@ -62,6 +62,6 @@ describe('外部能力只做映射', () => {
       },
     ]);
     expect(buffer.subarray(0, 2).toString('utf8')).toBe('PK');
-    expect(ledgerColumns.map((column) => column.header)).toContain('价税合计（元）');
+    expect(ledgerColumns.map((column) => column.header)).toContain('价税合计');
   }, 30_000);
 });

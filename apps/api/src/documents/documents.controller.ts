@@ -43,7 +43,9 @@ export class DocumentsController {
 
   @Get('applications')
   listApplications(@Req() request: AuthenticatedRequest, @Query() query: Record<string, unknown>) {
-    return this.list(request, query, (employeeId, page, pageSize) => this.documents.listApplications(employeeId, page, pageSize));
+    return this.list(request, query, (employeeId, page, pageSize) =>
+      this.documents.listApplications(employeeId, page, pageSize, query.inbox === '1'),
+    );
   }
 
   @Post('applications')
@@ -96,7 +98,9 @@ export class DocumentsController {
 
   @Get('loans')
   listLoans(@Req() request: AuthenticatedRequest, @Query() query: Record<string, unknown>) {
-    return this.list(request, query, (employeeId, page, pageSize) => this.documents.listLoans(employeeId, page, pageSize));
+    return this.list(request, query, (employeeId, page, pageSize) =>
+      this.documents.listLoans(employeeId, page, pageSize, query.inbox === '1'),
+    );
   }
 
   @Post('loans')
@@ -257,7 +261,9 @@ export class DocumentsController {
 
   @Get('corporate-bills')
   listCorporate(@Req() request: AuthenticatedRequest, @Query() query: Record<string, unknown>) {
-    return this.list(request, query, (employeeId, page, pageSize) => this.documents.listCorporate(employeeId, page, pageSize));
+    return this.list(request, query, (employeeId, page, pageSize) =>
+      this.documents.listCorporate(employeeId, page, pageSize, query.inbox === '1'),
+    );
   }
 
   @Post('corporate-bills')
@@ -339,7 +345,7 @@ export class DocumentsController {
 
   @Post('expense-reports/:id/voucher')
   voucher(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
-    return this.act(request, () => this.documents.exportVoucher(id));
+    return this.act(request, (employeeId) => this.documents.exportVoucher(employeeId, id));
   }
 
   @Post('invoice-ledger/exports')

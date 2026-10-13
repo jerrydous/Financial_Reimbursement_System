@@ -9,7 +9,7 @@ import {
   confirmRecognition,
   compareFen,
   draftFromVatPairs,
-  fenToYuanText,
+  minorToAmountText,
   normalizeIdempotencyKey,
   parseFen,
   verificationFromOfficial,
@@ -140,7 +140,15 @@ export class InvoiceCommands {
   async confirm(
     ownerEmployeeId: string,
     invoiceId: string,
-    input: { invoiceCode: string; invoiceNumber: string; amountFen: string; currency?: string },
+    input: {
+      invoiceCode: string;
+      invoiceNumber: string;
+      amountFen: string;
+      currency?: string;
+      buyerName?: string;
+      buyerTaxId?: string;
+      invoiceDate?: string;
+    },
   ): Promise<InvoiceView> {
     const currency = currencyCodeSchema.safeParse(input.currency ?? 'CNY');
     if (!currency.success) {
@@ -152,6 +160,9 @@ export class InvoiceCommands {
     }
     const code = input.invoiceCode.trim();
     const number = input.invoiceNumber.trim();
+    const buyerName = input.buyerName === undefined ? undefined : input.buyerName.trim();
+    const buyerTaxId = input.buyerTaxId === undefined ? undefined : input.buyerTaxId.trim().toUpperCase();
+    const invoiceDate = input.invoiceDate === undefined ? undefined : normalizeConfirmDate(input.invoiceDate);
     if (!number) {
       throw new ExpenseReportError('INVOICE_NUMBER_REQUIRED', '发票号码不能为空');
     }
@@ -200,6 +211,9 @@ export class InvoiceCommands {
           invoiceNumber: number,
           amountFen: amount,
           currency: currency.data,
+          buyerName: buyerName === undefined ? invoice.buyerName : buyerName,
+          buyerTaxId: buyerTaxId === undefined ? invoice.buyerTaxId : buyerTaxId,
+          invoiceDate: invoiceDate === undefined ? invoice.invoiceDate : invoiceDate,
           recognitionStatus: confirmRecognition(invoice.recognitionStatus as RecognitionStatus),
           verificationStatus: invoice.verificationStatus === 'verified' && sameIdentity ? 'verified' : 'unverified',
         },
@@ -238,7 +252,7 @@ export class InvoiceCommands {
         invoiceCode: invoice.invoiceCode,
         invoiceNumber: invoice.invoiceNumber,
         invoiceDate: invoice.invoiceDate,
-        amountYuan: invoice.amountFen === null ? undefined : fenToYuanText(parseFen(invoice.amountFen.toString())),
+        amountYuan: invoice.amountFen === null ? undefined : minorToAmountText(parseFen(invoice.amountFen.toString()), invoice.currency),
       });
     } catch (error) {
       if (error instanceof VerificationNotConfigured || (error instanceof Error && error.name === 'VerificationNotConfigured')) {
@@ -338,6 +352,34 @@ export class InvoiceCommands {
     return proxies.length > 0 && proxies.every((proxy) => proxy.startsOn > today || proxy.endsOn < today);
   }
 
+  /** 同一公司的财务、出纳，以及他们的有效代理人，在自己的岗位上可以看影像。 */
+  private async sameCompanyDesk(actorId: string, reportIds: string[]): Promise<boolean> {
+    if (reportIds.length === 0) {
+      return false;
+    }
+    const today = todayInShanghai();
+    const proxies = await this.prisma.approvalProxy.findMany({
+      where: { agentId: actorId, enabled: true, startsOn: { lte: today }, endsOn: { gte: today } },
+      select: { principalId: true },
+    });
+    const people = await this.prisma.employee.findMany({
+      where: { id: { in: [actorId, ...proxies.map((proxy) => proxy.principalId)] } },
+      select: { role: true, companyId: true },
+    });
+    const reports = await this.prisma.expenseReport.findMany({
+      where: { id: { in: reportIds } },
+      select: { status: true, employee: { select: { companyId: true } } },
+    });
+    return reports.some((report) =>
+      people.some(
+        (person) =>
+          person.companyId === report.employee.companyId &&
+          ((person.role === 'finance' && report.status === 'finance_review') ||
+            (person.role === 'cashier' && report.status === 'paying')),
+      ),
+    );
+  }
+
   /** 驳回、撤回会清掉发票上的报销单号，影像仍挂在单据明细上。能看单据的人要能看影像。 */
   private async readableInvoice(actorId: string, invoiceId: string) {
     const invoice = await this.prisma.invoice.findUnique({ where: { id: invoiceId } });
@@ -366,6 +408,9 @@ export class InvoiceCommands {
               OR: reportIds.map((reportId) => ({ documentId: reportId, objectKey: reportId })),
             },
           });
+    if (await this.sameCompanyDesk(actorId, reportIds)) {
+      return invoice;
+    }
     if (await this.expiredProxyOfCurrentActor(actorId, reportIds)) {
       throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查看别人的发票影像');
     }
@@ -417,39 +462,27 @@ export class InvoiceCommands {
     if (!target || target.companyId !== (await this.prisma.employee.findUnique({ where: { id: ownerEmployeeId } }))?.companyId) {
       throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '转交对象必须是同一公司的同事');
     }
-    const copyId = uuidv7();
-    await this.prisma.$transaction([
-      this.prisma.invoice.update({
-        where: { id: source.id },
-        data: { ledgerStatus: 'transferred', transferredToId: toEmployeeId },
-      }),
-      this.prisma.invoice.create({
-        data: {
-          id: copyId,
-          ownerEmployeeId: toEmployeeId,
-          objectKey: source.objectKey,
-          fileSha256: source.fileSha256,
-          contentType: source.contentType,
-          invoiceCode: source.invoiceCode,
-          invoiceNumber: source.invoiceNumber,
-          amountFen: source.amountFen,
-          currency: source.currency,
-          sellerName: source.sellerName,
-          buyerName: source.buyerName,
-          buyerTaxId: source.buyerTaxId,
-          invoiceDate: source.invoiceDate,
-          ocrStatus: source.ocrStatus,
-          ocrMessage: source.ocrMessage,
-          ocrRequestId: source.ocrRequestId,
-          recognitionStatus: source.recognitionStatus,
-          verificationStatus: 'unverified',
-          binding: 'released',
-          ledgerStatus: 'open',
-        },
-      }),
-    ]);
+    const duplicate = source.invoiceNumber
+      ? await this.prisma.invoice.findFirst({
+          where: {
+            tenantId: 'default',
+            ownerEmployeeId: toEmployeeId,
+            invoiceCode: source.invoiceCode,
+            invoiceNumber: source.invoiceNumber,
+            id: { not: source.id },
+            ledgerStatus: { not: 'removed' },
+            recognitionStatus: 'confirmed',
+          },
+        })
+      : null;
+    if (duplicate) {
+      throw new ExpenseReportError('INVOICE_ALREADY_BOUND', '这个发票号码已经确认过');
+    }
+    const updated = await this.prisma.invoice.update({
+      where: { id: source.id },
+      data: { ownerEmployeeId: toEmployeeId, transferredToId: toEmployeeId },
+    });
     logger.info({ documentId: source.id, actorId: ownerEmployeeId, workflowId: null, action: 'transfer_invoice' });
-    const updated = await this.prisma.invoice.findUniqueOrThrow({ where: { id: source.id } });
     return toInvoiceView(updated);
   }
 
@@ -512,6 +545,22 @@ function ledgerWhere(ownerEmployeeId: string, bucket: LedgerBucket) {
     return { ownerEmployeeId, binding: 'released', ledgerStatus: 'open' };
   }
   return { ownerEmployeeId, binding: 'released', ledgerStatus: bucket };
+}
+
+function normalizeConfirmDate(value: string): string {
+  const text = value.trim();
+  if (!text) {
+    return '';
+  }
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    return text;
+  }
+  const words = text.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+  if (!words?.[1] || !words[2] || !words[3]) {
+    throw new ExpenseReportError('REQUEST_INVALID', '开票日期格式应为 2026-10-13');
+  }
+  return `${words[1]}-${words[2].padStart(2, '0')}-${words[3].padStart(2, '0')}`;
 }
 
 function matchesDeclaredType(body: Buffer, contentType: string): boolean {

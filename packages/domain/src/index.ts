@@ -108,6 +108,7 @@ export {
   loanStatuses,
   loanTransitions,
   transitionLoan,
+  assertWriteOffWithinReport,
   writeOffLoan,
   type LoanAction,
   type LoanStatus,

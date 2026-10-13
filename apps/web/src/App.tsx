@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Layout, Menu, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { Link, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { getMe, listExpenseReports, type EmployeeView } from './api';
+import { getMe, listDocuments, listExpenseReports, type EmployeeView } from './api';
 import { initAuth, keycloak, logout } from './auth';
 import { LoginDialog } from './login-dialog';
 import { formatWhen, roleLabel, shortNo, statusLabel } from './labels';
@@ -170,9 +170,17 @@ function HomePage({
     queryFn: () => listExpenseReports(false, 1, 5),
   });
   const inbox = useQuery({
-    queryKey: ['expense-reports', true, 'home'],
+    queryKey: ['inbox-total'],
     enabled: authenticated,
-    queryFn: () => listExpenseReports(true, 1, 1),
+    queryFn: async () => {
+      const [reports, applications, loans, bills] = await Promise.all([
+        listExpenseReports(true, 1, 1),
+        listDocuments('application', 1, 1, true),
+        listDocuments('loan', 1, 1, true),
+        listDocuments('corporate', 1, 1, true),
+      ]);
+      return reports.total + applications.total + loans.total + bills.total;
+    },
   });
   const recent = mine.data?.items ?? [];
 
@@ -186,7 +194,7 @@ function HomePage({
       <div className="stat-grid">
         <article className="stat-card">
           <span>待我处理</span>
-          <strong>{authenticated ? (inbox.data?.total ?? 0) : 0}</strong>
+          <strong>{authenticated ? (inbox.data ?? 0) : 0}</strong>
         </article>
         <article className="stat-card">
           <span>我的单据</span>

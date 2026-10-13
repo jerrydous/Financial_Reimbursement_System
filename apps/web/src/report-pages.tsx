@@ -12,6 +12,7 @@ import {
   listExpenseReports,
   listInvoices,
   postAction,
+  postJson,
   submitExpenseReport,
   uploadInvoice,
   type ExpenseReportDetail,
@@ -29,21 +30,82 @@ const documentTabs = [
   { key: 'payment', label: '付款单' },
 ] as const;
 
+const inboxTabs = [
+  { key: 'expense', label: '报销单' },
+  { key: 'application', label: '申请单' },
+  { key: 'loan', label: '借款单' },
+  { key: 'corporate', label: '对公付款' },
+] as const;
+
+type ListKind = (typeof documentTabs)[number]['key'] | 'corporate';
+
+function InboxActions({ kind, id, status }: { kind: 'application' | 'loan' | 'corporate'; id: string; status: string }) {
+  const { message } = AntdApp.useApp();
+  const client = useQueryClient();
+  const act = useMutation({
+    mutationFn: async (path: string) => {
+      const key = path.endsWith('/payments') ? crypto.randomUUID() : undefined;
+      await postJson(path, undefined, key);
+    },
+    onSuccess: async () => {
+      message.success('已处理');
+      await client.invalidateQueries({ queryKey: ['documents'] });
+      await client.invalidateQueries({ queryKey: ['inbox-total'] });
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '没有处理');
+    },
+  });
+  const base = kind === 'application' ? `/applications/${id}` : kind === 'loan' ? `/loans/${id}` : `/corporate-bills/${id}`;
+  if (kind === 'corporate' && status === 'finance_review') {
+    return (
+      <Space>
+        <Button size="small" type="primary" loading={act.isPending} onClick={() => void act.mutateAsync(`${base}/finance-approve`)}>
+          通过
+        </Button>
+        <Button size="small" loading={act.isPending} onClick={() => void act.mutateAsync(`${base}/reject`)}>
+          驳回
+        </Button>
+      </Space>
+    );
+  }
+  if (kind === 'corporate' && status === 'paying') {
+    return (
+      <Button size="small" type="primary" loading={act.isPending} onClick={() => void act.mutateAsync(`${base}/payments`)}>
+        确认支付
+      </Button>
+    );
+  }
+  if (status !== 'approving') {
+    return null;
+  }
+  return (
+    <Space>
+      <Button size="small" type="primary" loading={act.isPending} onClick={() => void act.mutateAsync(`${base}/approve`)}>
+        同意
+      </Button>
+      <Button size="small" loading={act.isPending} onClick={() => void act.mutateAsync(`${base}/reject`)}>
+        驳回
+      </Button>
+    </Space>
+  );
+}
+
 export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: boolean }) {
-  const [kind, setKind] = useState<(typeof documentTabs)[number]['key']>('expense');
+  const [kind, setKind] = useState<ListKind>('expense');
   const [queue, setQueue] = useState<'pending' | 'handled'>('pending');
   const [page, setPage] = useState(1);
   const pageSize = 8;
   const handled = inbox && queue === 'handled';
   const list = useQuery({
     queryKey: ['expense-reports', inbox, handled, page, pageSize],
-    enabled: enabled && (inbox || kind === 'expense'),
+    enabled: enabled && kind === 'expense',
     queryFn: () => listExpenseReports(inbox, page, pageSize, handled),
   });
   const documents = useQuery({
-    queryKey: ['documents', kind, page, pageSize],
-    enabled: enabled && !inbox && kind !== 'expense',
-    queryFn: () => listDocuments(kind, page, pageSize),
+    queryKey: ['documents', kind, page, pageSize, inbox],
+    enabled: enabled && kind !== 'expense' && !(inbox && handled),
+    queryFn: () => listDocuments(kind, page, pageSize, inbox),
   });
   const createPath =
     kind === 'application' ? '/applications/new' : kind === 'loan' ? '/loans/new' : kind === 'contract' ? '/contracts/new' : '';
@@ -53,28 +115,48 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
   return (
     <section className="panel">
       {inbox ? (
-        <div className="tab-row">
-          <button
-            type="button"
-            className={queue === 'pending' ? 'tab active' : 'tab'}
-            onClick={() => {
-              setQueue('pending');
-              setPage(1);
-            }}
-          >
-            待我处理
-          </button>
-          <button
-            type="button"
-            className={queue === 'handled' ? 'tab active' : 'tab'}
-            onClick={() => {
-              setQueue('handled');
-              setPage(1);
-            }}
-          >
-            我已处理
-          </button>
-        </div>
+        <>
+          <div className="tab-row">
+            <button
+              type="button"
+              className={queue === 'pending' ? 'tab active' : 'tab'}
+              onClick={() => {
+                setQueue('pending');
+                setPage(1);
+              }}
+            >
+              待我处理
+            </button>
+            <button
+              type="button"
+              className={queue === 'handled' ? 'tab active' : 'tab'}
+              onClick={() => {
+                setQueue('handled');
+                setKind('expense');
+                setPage(1);
+              }}
+            >
+              我已处理
+            </button>
+          </div>
+          {queue === 'pending' ? (
+            <div className="tab-row">
+              {inboxTabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  className={kind === tab.key ? 'tab active' : 'tab'}
+                  onClick={() => {
+                    setKind(tab.key);
+                    setPage(1);
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </>
       ) : (
         <div className="tab-row">
           {documentTabs.map((tab) => (
@@ -98,12 +180,12 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
           </Link>
         )}
       </div>
-      {kind !== 'expense' && !inbox ? (
+      {kind !== 'expense' && !(inbox && handled) ? (
         <Table
           rowKey="id"
           loading={documents.isLoading}
           dataSource={documents.data?.items ?? []}
-          locale={{ emptyText: '还没有这类单据' }}
+          locale={{ emptyText: inbox ? '没有待处理的单据' : '还没有这类单据' }}
           pagination={{
             current: page,
             pageSize,
@@ -121,6 +203,16 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
               render: (amountFen: string) => formatMoney(amountFen, 'CNY'),
             },
             { title: '时间', dataIndex: 'createdAt', render: (value: string) => formatWhen(value) },
+            ...(inbox && (kind === 'application' || kind === 'loan' || kind === 'corporate')
+              ? [
+                  {
+                    title: '处理',
+                    render: (_value: unknown, row: { id: string; status: string }) => (
+                      <InboxActions kind={kind} id={row.id} status={row.status} />
+                    ),
+                  },
+                ]
+              : []),
           ]}
         />
       ) : (
@@ -153,6 +245,7 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
       />
       )}
       {list.error instanceof Error ? <Typography.Text type="danger">{list.error.message}</Typography.Text> : null}
+      {documents.error instanceof Error ? <Typography.Text type="danger">{documents.error.message}</Typography.Text> : null}
     </section>
   );
 }
@@ -167,7 +260,15 @@ export function NewReportPage() {
   const [file, setFile] = useState<File | null>(null);
   const [draftId, setDraftId] = useState<string | null>(null);
   const [sellerName, setSellerName] = useState('');
-  const [form] = Form.useForm<{ invoiceCode?: string; invoiceNumber: string; yuan: string; currency: string }>();
+  const [form] = Form.useForm<{
+    invoiceCode?: string;
+    invoiceNumber: string;
+    yuan: string;
+    currency: string;
+    buyerName?: string;
+    buyerTaxId?: string;
+    invoiceDate?: string;
+  }>();
   const currency = Form.useWatch('currency', form) ?? 'CNY';
   const pendingKey = useRef<{ fingerprint: string; key: string } | null>(null);
   const recognize = useMutation({
@@ -185,6 +286,9 @@ export function NewReportPage() {
         invoiceNumber: stored.invoiceNumber,
         currency: stored.currency || 'CNY',
         yuan: stored.amountFen ? minorToAmountText(parseFen(stored.amountFen), stored.currency || 'CNY') : '',
+        buyerName: stored.buyerName,
+        buyerTaxId: stored.buyerTaxId,
+        invoiceDate: stored.invoiceDate,
       });
       if (stored.reused && stored.binding === 'active') {
         message.warning('这张影像已经在报销单里，不会再新建一份');
@@ -201,7 +305,15 @@ export function NewReportPage() {
     },
   });
   const confirm = useMutation({
-    mutationFn: async (values: { invoiceCode?: string; invoiceNumber: string; yuan: string; currency: string }) => {
+    mutationFn: async (values: {
+      invoiceCode?: string;
+      invoiceNumber: string;
+      yuan: string;
+      currency: string;
+      buyerName?: string;
+      buyerTaxId?: string;
+      invoiceDate?: string;
+    }) => {
       if (!draftId) {
         throw new Error('请先上传并识别发票');
       }
@@ -210,6 +322,9 @@ export function NewReportPage() {
         invoiceNumber: values.invoiceNumber,
         amountFen: amountTextToMinor(values.yuan, values.currency).toString(),
         currency: values.currency,
+        buyerName: values.buyerName ?? '',
+        buyerTaxId: values.buyerTaxId ?? '',
+        invoiceDate: values.invoiceDate ?? '',
       });
     },
     onSuccess: async () => {
@@ -280,6 +395,22 @@ export function NewReportPage() {
           </Form.Item>
           <Form.Item label="发票号码" name="invoiceNumber" rules={[{ required: true, message: '填写发票号码' }]}>
             <Input />
+          </Form.Item>
+          <Form.Item label="购买方名称" name="buyerName" rules={[{ required: true, message: '填写购买方名称' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item label="购买方税号" name="buyerTaxId" rules={[{ required: true, message: '填写购买方税号' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item
+            label="开票日期"
+            name="invoiceDate"
+            rules={[
+              { required: true, message: '填写开票日期' },
+              { pattern: /^\d{4}-\d{2}-\d{2}$/, message: '日期格式应为 2026-10-13' },
+            ]}
+          >
+            <Input placeholder="2026-10-13" style={{ maxWidth: 240 }} />
           </Form.Item>
           <Form.Item label="币种" name="currency" initialValue="CNY" rules={[{ required: true, message: '选择币种' }]}>
             <Select options={[...currencyOptions]} style={{ maxWidth: 240 }} />
@@ -388,7 +519,7 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
     return <section className="panel">{report.isLoading ? '正在读取…' : '没有这张报销单'}</section>;
   }
   const current = report.data;
-  const mine = current.currentActorId === actorId;
+  const mine = current.canAct;
   const owner = current.employeeId === actorId;
   const actions = detailActions(current, mine, owner);
 
