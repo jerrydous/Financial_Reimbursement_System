@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ApiExceptionFilter } from './http-exception.filter';
+import { installKeycloakInternalRoute } from './keycloak-route';
 import { requestLog } from './logging';
 
 process.on('unhandledRejection', (reason) => {
@@ -16,9 +17,14 @@ process.on('unhandledRejection', (reason) => {
 });
 
 async function main(): Promise<void> {
+  installKeycloakInternalRoute();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: ['error', 'warn'] });
   app.use(requestLog);
   app.useGlobalFilters(new ApiExceptionFilter());
+  const prefix = process.env.API_GLOBAL_PREFIX?.trim().replace(/^\/+|\/+$/g, '');
+  if (prefix) {
+    app.setGlobalPrefix(prefix);
+  }
   app.enableCors({
     origin: process.env.WEB_ORIGIN ?? 'http://localhost:5173',
     allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'],
