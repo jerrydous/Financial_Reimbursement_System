@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { expenseReportListSchema, pageOffset, type ExpenseReportList } from '@frs/contracts';
+import { todayInShanghai } from '../calendar';
 import { PrismaService } from '../prisma.service';
 
 const handledActions = ['approve', 'reject', 'transfer', 'skip_to_finance', 'finance_adjust', 'finance_approve', 'pay_success', 'pay_fail'];
@@ -33,10 +34,43 @@ export class ExpenseReportsService {
     inbox: boolean,
   ): Promise<ExpenseReportList> {
     const skip = pageOffset(page, pageSize);
-    const where = {
-      accesses: { some: { actorId, action: 'read', revokedAt: null } },
-      ...(inbox ? { currentActorId: actorId } : {}),
-    };
+    const principals = inbox ? await this.proxyPrincipals(actorId) : [];
+    const deskPeople = inbox
+      ? await this.prisma.employee.findMany({
+          where: { id: { in: [actorId, ...principals] } },
+          select: { role: true, companyId: true },
+        })
+      : [];
+    const financeCompanies = [...new Set(deskPeople.filter((person) => person.role === 'finance').map((person) => person.companyId))];
+    const cashierCompanies = [...new Set(deskPeople.filter((person) => person.role === 'cashier').map((person) => person.companyId))];
+    const readByActor = { accesses: { some: { actorId, action: 'read', revokedAt: null } } };
+    const pendingVoters = [actorId, ...principals];
+    const where = inbox
+      ? {
+          OR: [
+            { ...readByActor, currentActorId: actorId },
+            ...(principals.length === 0
+              ? []
+              : [
+                  {
+                    currentActorId: { in: principals },
+                    OR: [
+                      readByActor,
+                      { accesses: { some: { actorId: { in: principals }, action: 'decide', revokedAt: null } } },
+                    ],
+                  },
+                ]),
+            {
+              approvalMode: { in: ['any', 'all'] },
+              status: 'approving',
+              votes: { some: { decision: 'pending', actorId: { in: pendingVoters } } },
+              accesses: { some: { actorId, action: 'read', revokedAt: null } },
+            },
+            ...(financeCompanies.length === 0 ? [] : [{ status: 'finance_review', employee: { companyId: { in: financeCompanies } } }]),
+            ...(cashierCompanies.length === 0 ? [] : [{ status: 'paying', employee: { companyId: { in: cashierCompanies } } }]),
+          ],
+        }
+      : readByActor;
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.expenseReport.count({ where }),
       this.prisma.expenseReport.findMany({
@@ -47,6 +81,15 @@ export class ExpenseReportsService {
       }),
     ]);
     return this.toList(rows, page, pageSize, total);
+  }
+
+  private async proxyPrincipals(agentId: string): Promise<string[]> {
+    const today = todayInShanghai();
+    const rows = await this.prisma.approvalProxy.findMany({
+      where: { agentId, enabled: true, startsOn: { lte: today }, endsOn: { gte: today } },
+      select: { principalId: true },
+    });
+    return [...new Set(rows.map((row) => row.principalId))];
   }
 
   async listOwn(employeeId: string, page: number, pageSize: number): Promise<ExpenseReportList> {

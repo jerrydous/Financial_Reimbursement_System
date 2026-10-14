@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { occupyQuota, releaseQuota, remainingQuota, transitionApplication } from './application';
 import { allocateByWeights } from './allocation';
-import { assertDelegate, assertWithdrawBeforeApproval, foldVotes, mayVote, nextDesk } from './approval-plan';
+import { assertDelegate, assertWithdrawBeforeApproval, deskForCurrency, foldVotes, mayVote, nextDesk } from './approval-plan';
 import { consumeBudget, releaseBudget, reserveBudget, retargetReservation } from './budget';
 import { assertFindingsAllowSubmit, crossesYear, invoiceAgeDays, matchBuyer, matchInvoiceAmount } from './compliance';
 import { applyInstallmentPayment, contractCanClose, transitionContract } from './corporate';
-import { assertNoOverdue, loanStatusAfterBalance, transitionLoan, writeOffLoan } from './loan';
+import { assertNoOverdue, assertWriteOffWithinReport, loanStatusAfterBalance, transitionLoan, writeOffLoan } from './loan';
 import { parseFen } from './money';
 import { subsidyAmount } from './subsidy';
 import { expenseDraftFromTravel } from './travel-draft';
@@ -53,6 +53,9 @@ describe('费控、审批、预算和发票不变量', () => {
     expect(nextDesk(fen('100'), null)).toBe('manager');
     expect(nextDesk(fen('100'), fen('100'))).toBe('finance');
     expect(nextDesk(fen('101'), fen('100'))).toBe('manager');
+    expect(deskForCurrency('CNY', fen('100'), fen('100'))).toBe('finance');
+    expect(deskForCurrency('USD', fen('100'), fen('100'))).toBe('manager');
+    expect(deskForCurrency('JPY', fen('100'), fen('100'))).toBe('manager');
     expect(transitionExpenseReport('submitted', 'skip_to_finance')).toBe('finance_review');
     expect(
       nextActorAfter('skip_to_finance', null, {
@@ -85,9 +88,11 @@ describe('费控、审批、预算和发票不变量', () => {
 
   it('冲销不超过借款余额，逾期未还不能提交', () => {
     expect(writeOffLoan(fen('500'), fen('200')).toString()).toBe('300');
+    expect(() => assertWriteOffWithinReport(fen('100'), [fen('80'), fen('30')])).toThrow(/不能超过本次报销/);
     expect(() => writeOffLoan(fen('500'), fen('501'))).toThrow(/借款余额/);
     expect(loanStatusAfterBalance(fen('0'))).toBe('settled');
     expect(transitionLoan('approving', 'approve')).toBe('outstanding');
+    expect(transitionLoan('approving', 'withdraw')).toBe('draft');
     expect(() =>
       assertNoOverdue([{ status: 'outstanding', dueOn: '2026-01-01', balance: fen('1') }], '2026-10-10'),
     ).toThrow(/逾期未还/);
@@ -138,6 +143,15 @@ describe('费控、审批、预算和发票不变量', () => {
       explanation: '报销',
     });
     expect(voucher.lines.map((line) => line.debitYuan)).toEqual(['1.00', '0.00']);
+    const yen = voucherFromPaidReport({
+      reportId: 'r',
+      status: 'paid',
+      paidOn: '2026-10-10',
+      amount: fen('1200'),
+      currency: 'JPY',
+      explanation: '报销',
+    });
+    expect(yen.lines[0]?.debitYuan).toBe('1200');
     expect(voucher.lines.map((line) => line.creditYuan)).toEqual(['0.00', '1.00']);
   });
 

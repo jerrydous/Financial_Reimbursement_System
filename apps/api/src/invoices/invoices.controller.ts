@@ -15,7 +15,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { confirmInvoiceSchema, invoiceListSchema, ledgerBucketSchema, pageQuerySchema, transferSchema } from '@frs/contracts';
+import { confirmInvoiceSchema, currencyCodeSchema, invoiceListSchema, ledgerBucketSchema, pageQuerySchema, transferSchema } from '@frs/contracts';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard';
 import { EmployeeService } from '../employee/employee.service';
 import { rethrowAsHttp } from '../expense-reports/http-error';
@@ -68,6 +68,12 @@ export class InvoicesController {
 
   @Post('invoices/:id/confirm')
   async confirm(@Req() request: AuthenticatedRequest, @Param('id') id: string, @Body() body: unknown) {
+    if (body && typeof body === 'object' && 'currency' in body) {
+      const currency = (body as { currency?: unknown }).currency;
+      if (currency !== undefined && !currencyCodeSchema.safeParse(currency).success) {
+        throw new BadRequestException({ code: 'CURRENCY_MISMATCH', message: '币种不支持' });
+      }
+    }
     const parsed = confirmInvoiceSchema.safeParse(body);
     if (!parsed.success) {
       throw new BadRequestException({ code: 'REQUEST_INVALID', message: '确认内容不合法' });

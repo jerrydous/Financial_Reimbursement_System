@@ -13,6 +13,7 @@ import {
   ExpenseReportError,
   applyInstallmentPayment,
   assertDelegate,
+  assertSingleRoleAssignee,
   contractCanClose,
   loanStatusAfterBalance,
   normalizeIdempotencyKey,
@@ -70,7 +71,10 @@ export class DocumentCommands {
     },
   ) {}
 
-  async listApplications(employeeId: string, page: number, pageSize: number): Promise<DocumentList> {
+  async listApplications(employeeId: string, page: number, pageSize: number, inbox = false): Promise<DocumentList> {
+    if (inbox) {
+      return this.listForManagers('application', employeeId, page, pageSize);
+    }
     return this.listOwned('application', employeeId, page, pageSize);
   }
 
@@ -119,7 +123,10 @@ export class DocumentCommands {
     return updated;
   }
 
-  async listLoans(employeeId: string, page: number, pageSize: number): Promise<DocumentList> {
+  async listLoans(employeeId: string, page: number, pageSize: number, inbox = false): Promise<DocumentList> {
+    if (inbox) {
+      return this.listForManagers('loan', employeeId, page, pageSize);
+    }
     return this.listOwned('loan', employeeId, page, pageSize);
   }
 
@@ -136,19 +143,28 @@ export class DocumentCommands {
   }
 
   async submitLoan(employeeId: string, id: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const row = await this.lockLoan(tx, id);
       this.owned(row.employeeId, employeeId);
+      if (!row.employee.managerId) {
+        throw new ExpenseReportError('MANAGER_NOT_ASSIGNED', '员工没有主管，不能提交');
+      }
       const next = transitionLoan(asLoan(row.status), 'submit');
       await tx.loan.update({ where: { id }, data: { status: next, version: { increment: 1 } } });
-      return { id, status: next };
+      return { id, status: next, managerId: row.employee.managerId };
     });
+    await this.remind(id, 'loan', result.managerId ?? '');
+    return { id: result.id, status: result.status };
   }
 
-  async decideLoan(actorId: string, id: string, action: 'approve' | 'reject') {
-    return this.prisma.$transaction(async (tx) => {
+  async decideLoan(actorId: string, id: string, action: 'approve' | 'reject' | 'withdraw') {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const row = await this.lockLoan(tx, id);
-      await this.assertManager(tx, row.employee.managerId, actorId);
+      if (action === 'withdraw') {
+        this.owned(row.employeeId, actorId);
+      } else {
+        await this.assertManager(tx, row.employee.managerId, actorId);
+      }
       const next = transitionLoan(asLoan(row.status), action);
       await tx.loan.update({
         where: { id },
@@ -156,6 +172,8 @@ export class DocumentCommands {
       });
       return { id, status: next };
     });
+    await this.stopRemind(id, 'loan');
+    return updated;
   }
 
   async repay(employeeId: string, loanId: string, amountFen: string, idempotencyKey: string | undefined) {
@@ -166,7 +184,10 @@ export class DocumentCommands {
           where: { tenantId_operation_key: { tenantId: 'default', operation: 'repay_loan', key } },
         });
         if (existing) {
-          const loan = await tx.loan.findUnique({ where: { id: existing.documentId } });
+          if (existing.documentId !== loanId) {
+            throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', '这个还款编号已经用于另一笔借款');
+          }
+          const loan = await tx.loan.findUnique({ where: { id: loanId } });
           return { id: loanId, status: loan?.status ?? 'outstanding', balanceFen: loan?.balanceFen.toString() ?? '0' };
         }
         await tx.$queryRaw`SELECT id FROM loans WHERE id = ${loanId} FOR UPDATE`;
@@ -194,6 +215,12 @@ export class DocumentCommands {
     } catch (error) {
       if (!isUniqueViolation(error)) {
         throw error;
+      }
+      const existing = await this.prisma.idempotencyKey.findUnique({
+        where: { tenantId_operation_key: { tenantId: 'default', operation: 'repay_loan', key } },
+      });
+      if (!existing || existing.documentId !== loanId) {
+        throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', '这个还款编号已经用于另一笔借款');
       }
       const loan = await this.prisma.loan.findUnique({ where: { id: loanId } });
       return { id: loanId, status: loan?.status ?? 'outstanding', balanceFen: loan?.balanceFen.toString() ?? '0' };
@@ -241,7 +268,7 @@ export class DocumentCommands {
   }
 
   async createBudget(actorId: string, input: { departmentId: string; projectId: string; subjectId: string; period: string; amountFen: string }) {
-    await this.assertFinance(actorId);
+    await this.assertFinanceRole(actorId);
     const amount = parseFen(input.amountFen);
     const id = uuidv7();
     await this.prisma.budgetLine.create({
@@ -408,7 +435,11 @@ export class DocumentCommands {
         where: { tenantId_operation_key: { tenantId: 'default', operation: 'pay_installment', key } },
       });
       if (existing) {
-        return { id };
+        if (existing.documentId !== id) {
+          throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', '这个付款编号已经用于另一期');
+        }
+        const installment = await tx.installment.findUnique({ where: { id } });
+        return { id, status: installment?.status ?? 'pending' };
       }
       await tx.$queryRaw`SELECT id FROM installments WHERE id = ${id} FOR UPDATE`;
       const row = await tx.installment.findUnique({ where: { id }, include: { contract: true } });
@@ -430,7 +461,10 @@ export class DocumentCommands {
     });
   }
 
-  async listCorporate(employeeId: string, page: number, pageSize: number): Promise<DocumentList> {
+  async listCorporate(employeeId: string, page: number, pageSize: number, inbox = false): Promise<DocumentList> {
+    if (inbox) {
+      return this.listCorporateInbox(employeeId, page, pageSize);
+    }
     return this.listOwned('corporateBill', employeeId, page, pageSize);
   }
 
@@ -493,8 +527,11 @@ export class DocumentCommands {
         where: { tenantId_operation_key: { tenantId: 'default', operation: 'confirm_corporate_payment', key } },
       });
       if (existing) {
-        const bill = await this.prisma.corporateBill.findUnique({ where: { id: existing.documentId } });
-        return { id: existing.documentId, status: bill?.status ?? 'paid' };
+        if (existing.documentId !== id) {
+          throw new DomainError('IDEMPOTENCY_PAYLOAD_MISMATCH', '这个支付编号已经用于另一张单据');
+        }
+        const bill = await this.prisma.corporateBill.findUnique({ where: { id } });
+        return { id, status: bill?.status ?? 'paid' };
       }
     }
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -502,12 +539,14 @@ export class DocumentCommands {
       const status = asReport(row.status);
       if (action === 'withdraw') {
         this.owned(row.employeeId, actorId);
+      } else if (action === 'reject' && status === 'finance_review') {
+        await this.assertFinance(actorId, row.employee.companyId);
       } else if (action === 'approve' || action === 'reject') {
         await this.assertManager(tx, row.currentActorId, actorId);
       } else if (action === 'finance_approve') {
-        await this.assertFinance(actorId);
+        await this.assertFinance(actorId, row.employee.companyId);
       } else {
-        await this.assertCashier(actorId);
+        await this.assertCashier(actorId, row.employee.companyId);
       }
       const next = transitionExpenseReport(status, action);
       if (action === 'reject' || action === 'withdraw') {
@@ -516,13 +555,24 @@ export class DocumentCommands {
       if (action === 'pay_success') {
         await consumeCorporateBudget(tx, id);
       }
-      const finance = action === 'approve' ? await tx.employee.findFirst({ where: { role: 'finance' } }) : null;
-      const cashier = action === 'finance_approve' ? await tx.employee.findFirst({ where: { role: 'cashier' } }) : null;
+      const companyId = row.employee.companyId;
+      const finance =
+        action === 'approve' ? await tx.employee.findMany({ where: { role: 'finance', companyId }, select: { id: true } }) : [];
+      const cashiers =
+        action === 'finance_approve'
+          ? await tx.employee.findMany({ where: { role: 'cashier', companyId }, select: { id: true } })
+          : [];
+      if (action === 'approve') {
+        assertSingleRoleAssignee('finance', finance.length);
+      }
+      if (action === 'finance_approve') {
+        assertSingleRoleAssignee('cashier', cashiers.length);
+      }
       await tx.corporateBill.update({
         where: { id },
         data: {
           status: next,
-          currentActorId: finance?.id ?? cashier?.id ?? null,
+          currentActorId: finance[0]?.id ?? cashiers[0]?.id ?? null,
           version: { increment: 1 },
         },
       });
@@ -578,20 +628,7 @@ export class DocumentCommands {
       if (!isUniqueViolation(error)) {
         throw error;
       }
-      const existing = await this.prisma.travelOrder.findUnique({
-        where: { tenantId_provider_externalId: { tenantId: 'default', provider, externalId: draft.externalId } },
-      });
-      if (!existing) {
-        throw new DomainError('TRAVEL_DUPLICATE', '这张商旅订单已经导入');
-      }
-      return {
-        id: existing.id,
-        externalId: existing.externalId,
-        amountFen: existing.amountFen.toString(),
-        occurredOn: existing.occurredOn,
-        summary: existing.summary,
-        reused: true,
-      };
+      throw new DomainError('TRAVEL_DUPLICATE', '这张商旅订单已经导入');
     }
   }
 
@@ -599,30 +636,46 @@ export class DocumentCommands {
     return this.listOwned('travelOrder', employeeId, page, pageSize);
   }
 
-  async exportVoucher(reportId: string) {
-    const report = await this.prisma.expenseReport.findUnique({ where: { id: reportId } });
-    if (!report) {
+  private async financeOrCashier(actorId: string): Promise<{ companyId: string }> {
+    const employee = await this.prisma.employee.findUnique({ where: { id: actorId } });
+    if (!employee || (employee.role !== 'finance' && employee.role !== 'cashier')) {
+      throw new DomainError('ACTOR_FORBIDDEN', '只有财务或出纳可以导出');
+    }
+    return employee;
+  }
+
+  async exportVoucher(actorId: string, reportId: string) {
+    const actor = await this.financeOrCashier(actorId);
+    const report = await this.prisma.expenseReport.findUnique({
+      where: { id: reportId },
+      include: { employee: { select: { companyId: true } } },
+    });
+    if (!report || report.employee.companyId !== actor.companyId) {
       throw new ExpenseReportError('REPORT_NOT_FOUND', '报销单不存在');
     }
     const paidOn = todayInShanghai();
+    const amount = parseFen(report.amountFen.toString());
     const payload = voucherFromPaidReport({
       reportId,
       status: report.status,
       paidOn,
-      amount: parseFen(report.amountFen.toString()),
+      amount,
+      currency: report.currency,
       explanation: '对私报销',
     });
     const posted = await createVoucherExportFromEnv().exportPaid({
       reportId,
       status: report.status,
       paidOn,
-      amount: parseFen(report.amountFen.toString()),
+      amount,
+      currency: report.currency,
       explanation: '对私报销',
     });
     return { posted: posted.posted, message: posted.message, payload };
   }
 
   async createExport(actorId: string, idempotencyKey: string | undefined): Promise<ExportJob> {
+    await this.financeOrCashier(actorId);
     const key = normalizeIdempotencyKey(idempotencyKey);
     const existing = await this.prisma.exportJob.findUnique({
       where: { tenantId_idempotencyKey: { tenantId: 'default', idempotencyKey: key } },
@@ -651,11 +704,20 @@ export class DocumentCommands {
     if (!job || job.status === 'succeeded') {
       return;
     }
-    const rows = await this.prisma.invoice.findMany({ orderBy: { createdAt: 'desc' }, take: 1000 });
+    const actor = job ? await this.prisma.employee.findUnique({ where: { id: job.actorId } }) : null;
+    const colleagues = actor
+      ? await this.prisma.employee.findMany({ where: { companyId: actor.companyId }, select: { id: true } })
+      : [];
+    const rows = await this.prisma.invoice.findMany({
+      where: { ownerEmployeeId: { in: colleagues.map((person) => person.id) } },
+      orderBy: { createdAt: 'desc' },
+      take: 1000,
+    });
     const ledger: LedgerRow[] = rows.map((row) => ({
       invoiceCode: row.invoiceCode,
       invoiceNumber: row.invoiceNumber,
       amountFen: row.amountFen?.toString() ?? null,
+      currency: row.currency,
       sellerName: row.sellerName,
       invoiceDate: row.invoiceDate,
       verificationStatus: row.verificationStatus,
@@ -673,7 +735,7 @@ export class DocumentCommands {
   }
 
   async publishPolicy(actorId: string, input: { name: string; rules: Record<string, unknown>[]; skipManagerBelowFen?: string | null }) {
-    await this.assertFinance(actorId);
+    await this.assertFinanceRole(actorId);
     const latest = await this.prisma.policyVersion.findFirst({
       where: { tenantId: 'default', name: input.name },
       orderBy: { version: 'desc' },
@@ -728,6 +790,76 @@ export class DocumentCommands {
         throw error;
       }
     }
+  }
+
+  private async actingIds(actorId: string): Promise<string[]> {
+    const today = todayInShanghai();
+    const proxies = await this.prisma.approvalProxy.findMany({
+      where: { agentId: actorId, enabled: true, startsOn: { lte: today }, endsOn: { gte: today } },
+      select: { principalId: true },
+    });
+    return [...new Set([actorId, ...proxies.map((proxy) => proxy.principalId)])];
+  }
+
+  private async listForManagers(
+    kind: 'application' | 'loan',
+    actorId: string,
+    page: number,
+    pageSize: number,
+  ): Promise<DocumentList> {
+    const ids = await this.actingIds(actorId);
+    const skip = pageOffset(page, pageSize);
+    const where = { status: 'approving', employee: { managerId: { in: ids } } };
+    if (kind === 'application') {
+      const [total, rows] = await this.prisma.$transaction([
+        this.prisma.application.count({ where }),
+        this.prisma.application.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: pageSize }),
+      ]);
+      return this.page(
+        rows.map((row) => ({ id: row.id, status: row.status, amountFen: row.amountFen, title: row.purpose, createdAt: row.createdAt })),
+        page,
+        pageSize,
+        total,
+      );
+    }
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.loan.count({ where }),
+      this.prisma.loan.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: pageSize }),
+    ]);
+    return this.page(
+      rows.map((row) => ({ id: row.id, status: row.status, amountFen: row.balanceFen, title: `到期 ${row.dueOn}`, createdAt: row.createdAt })),
+      page,
+      pageSize,
+      total,
+    );
+  }
+
+  private async listCorporateInbox(actorId: string, page: number, pageSize: number): Promise<DocumentList> {
+    const ids = await this.actingIds(actorId);
+    const people = await this.prisma.employee.findMany({
+      where: { id: { in: ids } },
+      select: { role: true, companyId: true },
+    });
+    const financeCompanies = [...new Set(people.filter((person) => person.role === 'finance').map((person) => person.companyId))];
+    const cashierCompanies = [...new Set(people.filter((person) => person.role === 'cashier').map((person) => person.companyId))];
+    const skip = pageOffset(page, pageSize);
+    const where = {
+      OR: [
+        { status: 'approving', currentActorId: { in: ids } },
+        ...(financeCompanies.length === 0 ? [] : [{ status: 'finance_review', employee: { companyId: { in: financeCompanies } } }]),
+        ...(cashierCompanies.length === 0 ? [] : [{ status: 'paying', employee: { companyId: { in: cashierCompanies } } }]),
+      ],
+    };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.corporateBill.count({ where }),
+      this.prisma.corporateBill.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: pageSize }),
+    ]);
+    return this.page(
+      rows.map((row) => ({ id: row.id, status: row.status, amountFen: row.amountFen, title: row.invoiceNumber || '对公付款', createdAt: row.createdAt })),
+      page,
+      pageSize,
+      total,
+    );
   }
 
   private async listOwned(kind: 'application' | 'loan' | 'contract' | 'corporateBill' | 'travelOrder', employeeId: string, page: number, pageSize: number): Promise<DocumentList> {
@@ -866,17 +998,24 @@ export class DocumentCommands {
     assertDelegate(principalId, actorId, proxy ? { agentId: proxy.agentId, active: true } : null);
   }
 
-  private async assertFinance(actorId: string): Promise<void> {
+  private async assertFinanceRole(actorId: string): Promise<void> {
     const actor = await this.prisma.employee.findUnique({ where: { id: actorId } });
     if (!actor || actor.role !== 'finance') {
       throw new DomainError('ACTOR_FORBIDDEN', '只有财务可以执行');
     }
   }
 
-  private async assertCashier(actorId: string): Promise<void> {
+  private async assertFinance(actorId: string, companyId: string): Promise<void> {
     const actor = await this.prisma.employee.findUnique({ where: { id: actorId } });
-    if (!actor || actor.role !== 'cashier') {
-      throw new DomainError('ACTOR_FORBIDDEN', '只有出纳可以执行');
+    if (!actor || actor.role !== 'finance' || actor.companyId !== companyId) {
+      throw new DomainError('ACTOR_FORBIDDEN', '只有本公司财务可以执行');
+    }
+  }
+
+  private async assertCashier(actorId: string, companyId: string): Promise<void> {
+    const actor = await this.prisma.employee.findUnique({ where: { id: actorId } });
+    if (!actor || actor.role !== 'cashier' || actor.companyId !== companyId) {
+      throw new DomainError('ACTOR_FORBIDDEN', '只有本公司出纳可以执行');
     }
   }
 

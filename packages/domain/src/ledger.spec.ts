@@ -32,16 +32,21 @@ describe('增值税发票识别草稿', () => {
       invoiceNumber: '12345678',
       amountFen: '123450',
       sellerName: '示例餐饮店',
+      buyerName: '',
+      buyerTaxId: '',
       invoiceDate: '2024-03-07',
     });
   });
 
-  it('从票面文字自己对应发票号码、金额、日期和销售方', () => {
+  it('从票面文字自己对应发票号码、金额、日期、销售方和购买方', () => {
     const draft = draftFromVatPairs(
       pairsFromInvoiceText(`
         电子发票（普通发票）
         发票号码：26112000000706612096
         开票日期：2024年3月7日
+        购买方
+        名称：示例公司
+        纳税人识别号：91330100example001
         销售方
         名称：示例餐饮店
         价税合计（小写） ¥1,234.50
@@ -52,6 +57,8 @@ describe('增值税发票识别草稿', () => {
       invoiceNumber: '26112000000706612096',
       amountFen: '123450',
       sellerName: '示例餐饮店',
+      buyerName: '示例公司',
+      buyerTaxId: '91330100EXAMPLE001',
       invoiceDate: '2024-03-07',
     });
   });

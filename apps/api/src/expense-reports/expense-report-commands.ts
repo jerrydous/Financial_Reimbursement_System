@@ -15,8 +15,7 @@ import {
   assertReportMatchesLines,
   assertSingleRoleAssignee,
   assertLedgerOpen,
-  assertVerificationUnverified,
-  assertWithdrawBeforeApproval,
+  assertVerificationAllowsExpense,
   buildAuditDraft,
   decideObjectKey,
   expenseWorkflowId,
@@ -46,6 +45,7 @@ import {
   consumeReportBudget,
   deskForAmount,
   enforceSubmitControls,
+  releaseExcessWriteOff,
   releaseReportControls,
   retargetReportBudget,
 } from './report-controls';
@@ -112,20 +112,12 @@ export class ExpenseReportCommands {
       actorId: employeeId,
       workflowId: null,
     });
-    try {
-      await this.workflows.signalDecision(reportId, { action: 'withdraw', actorId: employeeId });
-    } catch (error) {
-      if (error instanceof WorkflowNotRunning) {
-        return detail;
-      }
-      logger.error({
-        documentId: reportId,
-        actorId: employeeId,
-        workflowId: detail.id,
-        message: error instanceof Error ? error.message : 'withdraw signal failed',
-      });
-      throw new ExpenseReportError('WORKFLOW_UNAVAILABLE', '单据已撤回，审批流程还没同步。请再点一次撤回。');
-    }
+    await this.notifyWorkflow(reportId, employeeId, {
+      action: 'withdraw',
+      actorId: employeeId,
+      alreadyApplied: true,
+      status: detail.status,
+    });
     return detail;
   }
 
@@ -154,73 +146,39 @@ export class ExpenseReportCommands {
     action: ExpenseReportAction,
     extra: { transferToEmployeeId?: string; idempotencyKey?: string },
   ): Promise<{ accepted: true }> {
-    const report = await this.prisma.expenseReport.findUnique({ where: { id: reportId } });
-    if (!report) {
-      throw new ExpenseReportError('REPORT_NOT_FOUND', '报销单不存在');
-    }
-    const status = asReportStatus(report.status);
-    const step = stepForStatus(status);
-    if (!step || !report.currentActorId) {
-      throw new ExpenseReportError('ACTOR_UNASSIGNED', '当前步骤没有操作者');
-    }
-    const policies = await this.prisma.documentAccess.findMany({
-      where: { documentId: reportId, revokedAt: null },
+    const detail = await this.apply({
+      reportId,
+      action,
+      actorId: employeeId,
+      workflowId: null,
+      transferToEmployeeId: extra.transferToEmployeeId ?? null,
+      idempotencyKey: extra.idempotencyKey ?? null,
     });
-    const objectKey = decideObjectKey(reportId, step);
-    let allowed = await enforceDocumentPolicy(
-      employeeId,
-      objectKey,
-      'decide',
-      policies.map((policy) => ({ actorId: policy.actorId, objectKey: policy.objectKey, action: policy.action })),
-    );
-    const today = todayInShanghai();
-    const proxies = await this.prisma.approvalProxy.findMany({
-      where: { enabled: true, OR: [{ agentId: employeeId }, { principalId: report.currentActorId }] },
+    await this.notifyWorkflow(reportId, employeeId, {
+      action,
+      actorId: employeeId,
+      transferToEmployeeId: extra.transferToEmployeeId ?? null,
+      idempotencyKey: extra.idempotencyKey ?? null,
+      alreadyApplied: true,
+      status: detail.status,
     });
-    const active = proxies.filter((proxy) => proxy.startsOn <= today && proxy.endsOn >= today);
-    if (!allowed) {
-      for (const proxy of active) {
-        if (proxy.agentId !== employeeId) {
-          continue;
-        }
-        allowed = await enforceDocumentPolicy(
-          proxy.principalId,
-          objectKey,
-          'decide',
-          policies.map((policy) => ({ actorId: policy.actorId, objectKey: policy.objectKey, action: policy.action })),
-        );
-        if (allowed) {
-          break;
-        }
-      }
-    }
-    if (!allowed) {
-      throw new ExpenseReportError('ACTOR_FORBIDDEN', '当前员工不能执行这个动作');
-    }
-    if (report.approvalMode === 'single' && report.currentActorId) {
-      const proxy = active.find((item) => item.principalId === report.currentActorId) ?? null;
-      assertDelegate(report.currentActorId, employeeId, proxy ? { agentId: proxy.agentId, active: true } : null);
-    }
-    if (action === 'pay_success' || action === 'pay_fail') {
-      normalizeIdempotencyKey(extra.idempotencyKey);
-    }
+    return { accepted: true };
+  }
+
+  private async notifyWorkflow(reportId: string, actorId: string, decision: ExpenseDecisionSignal): Promise<void> {
     try {
-      await this.workflows.signalDecision(reportId, {
-        action,
-        actorId: employeeId,
-        transferToEmployeeId: extra.transferToEmployeeId ?? null,
-        idempotencyKey: extra.idempotencyKey ?? null,
-      });
+      await this.workflows.signalDecision(reportId, decision);
     } catch (error) {
+      if (error instanceof WorkflowNotRunning) {
+        return;
+      }
       logger.error({
         documentId: reportId,
-        actorId: employeeId,
-        workflowId: report.workflowId,
+        actorId,
+        workflowId: expenseWorkflowId(reportId),
         message: error instanceof Error ? error.message : 'workflow signal failed',
       });
-      throw new ExpenseReportError('WORKFLOW_UNAVAILABLE', '审批流程暂时不能接收这个动作');
     }
-    return { accepted: true };
   }
 
   async adjust(employeeId: string, reportId: string, approvedAmountFen: string): Promise<ExpenseReportDetail> {
@@ -255,13 +213,13 @@ export class ExpenseReportCommands {
   async getVisible(actorId: string, reportId: string): Promise<ExpenseReportDetail> {
     const owned = await this.prisma.expenseReport.findUnique({
       where: { id: reportId },
-      select: { employeeId: true },
+      select: { employeeId: true, currentActorId: true },
     });
     if (!owned) {
       throw new ExpenseReportError('REPORT_NOT_FOUND', '报销单不存在');
     }
     if (owned.employeeId === actorId) {
-      return this.prisma.$transaction((tx) => loadReport(tx, reportId));
+      return this.withAct(actorId, reportId);
     }
     const policies = await this.prisma.documentAccess.findMany({
       where: { documentId: reportId, revokedAt: null, action: 'read' },
@@ -272,10 +230,60 @@ export class ExpenseReportCommands {
       'read',
       policies.map((policy) => ({ actorId: policy.actorId, objectKey: policy.objectKey, action: policy.action })),
     );
-    if (!allowed) {
+    if (!allowed && !(await this.proxiesCurrentActor(actorId, owned.currentActorId)) && !(await this.viewerCanAct(actorId, reportId))) {
       throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能查看这张报销单');
     }
-    return this.prisma.$transaction((tx) => loadReport(tx, reportId));
+    return this.withAct(actorId, reportId);
+  }
+
+  private async withAct(actorId: string, reportId: string): Promise<ExpenseReportDetail> {
+    const detail = await this.prisma.$transaction((tx) => loadReport(tx, reportId));
+    return { ...detail, canAct: await this.viewerCanAct(actorId, reportId) };
+  }
+
+  private async viewerCanAct(actorId: string, reportId: string): Promise<boolean> {
+    const report = await this.prisma.expenseReport.findUnique({
+      where: { id: reportId },
+      include: { votes: true },
+    });
+    if (!report?.currentStep) {
+      return false;
+    }
+    const today = todayInShanghai();
+    const proxies = await this.prisma.approvalProxy.findMany({
+      where: { agentId: actorId, enabled: true, startsOn: { lte: today }, endsOn: { gte: today } },
+      select: { principalId: true },
+    });
+    const principals = new Set(proxies.map((proxy) => proxy.principalId));
+    if (report.approvalMode !== 'single' && report.status === 'approving') {
+      const pending = report.votes.filter((vote) => vote.decision === 'pending').map((vote) => vote.actorId);
+      if (pending.includes(actorId) || pending.some((principalId) => principals.has(principalId))) {
+        return true;
+      }
+    }
+    const viewers = await this.prisma.employee.findMany({
+      where: { id: { in: [actorId, ...principals] } },
+      select: { role: true, companyId: true },
+    });
+    const owner = await this.prisma.employee.findUnique({ where: { id: report.employeeId }, select: { companyId: true } });
+    if (owner && viewers.some((person) => person.companyId === owner.companyId && person.role === 'finance' && report.status === 'finance_review')) {
+      return true;
+    }
+    if (owner && viewers.some((person) => person.companyId === owner.companyId && person.role === 'cashier' && report.status === 'paying')) {
+      return true;
+    }
+    return report.currentActorId === actorId || (report.currentActorId !== null && principals.has(report.currentActorId));
+  }
+
+  private async proxiesCurrentActor(agentId: string, principalId: string | null): Promise<boolean> {
+    if (!principalId || principalId === agentId) {
+      return false;
+    }
+    const today = todayInShanghai();
+    const proxy = await this.prisma.approvalProxy.findFirst({
+      where: { agentId, principalId, enabled: true, startsOn: { lte: today }, endsOn: { gte: today } },
+    });
+    return proxy !== null;
   }
 
   private async createDraftOnce(
@@ -314,7 +322,7 @@ export class ExpenseReportCommands {
         if (invoice.ownerEmployeeId !== employeeId) {
           throw new ExpenseReportError('ACTOR_FORBIDDEN', '不能使用别人的发票');
         }
-        assertVerificationUnverified(invoice.verificationStatus);
+        assertVerificationAllowsExpense(invoice.verificationStatus);
         assertLedgerOpen(invoice.ledgerStatus);
         if (invoice.binding !== 'released') {
           throw new ExpenseReportError('INVOICE_ALREADY_BOUND', '这张发票已经在另一张有效报销单里');
@@ -325,6 +333,30 @@ export class ExpenseReportCommands {
             invoice.amountFen === null ? null : parseFen(invoice.amountFen.toString()),
           ),
         );
+      }
+      const seenNumbers = new Set<string>();
+      for (const invoice of invoices) {
+        if (!invoice.invoiceNumber) {
+          continue;
+        }
+        const identity = `${invoice.invoiceCode}\0${invoice.invoiceNumber}`;
+        if (seenNumbers.has(identity)) {
+          throw new ExpenseReportError('INVOICE_ALREADY_BOUND', '这个发票号码已经确认过');
+        }
+        seenNumbers.add(identity);
+        const duplicate = await tx.invoice.findFirst({
+          where: {
+            tenantId: 'default',
+            invoiceCode: invoice.invoiceCode,
+            invoiceNumber: invoice.invoiceNumber,
+            id: { notIn: ids },
+            ledgerStatus: { not: 'removed' },
+            OR: [{ binding: 'active' }, { recognitionStatus: 'confirmed' }],
+          },
+        });
+        if (duplicate) {
+          throw new ExpenseReportError('INVOICE_ALREADY_BOUND', '这个发票号码已经确认过');
+        }
       }
       const currencies = [...new Set(invoices.map((invoice) => invoice.currency))];
       const parsedCurrency = currencyCodeSchema.safeParse(currencies[0]);
@@ -473,10 +505,8 @@ export class ExpenseReportCommands {
     if (!manager || manager.role !== 'manager') {
       throw new ExpenseReportError('MANAGER_NOT_ASSIGNED', '员工没有主管，不能提交');
     }
-    const finance = await tx.employee.findMany({ where: { role: 'finance' } });
-    const cashiers = await tx.employee.findMany({ where: { role: 'cashier' } });
-    assertSingleRoleAssignee('finance', finance.length);
-    assertSingleRoleAssignee('cashier', cashiers.length);
+    await this.requireCompanyRole(tx, 'finance', report.employee.companyId);
+    await this.requireCompanyRole(tx, 'cashier', report.employee.companyId);
     const lineAmounts = report.lines.map((line) => parseFen(line.amountFen.toString()));
     const subsidy = parseFen(report.subsidyFen.toString());
     assertReportMatchesLines(parseFen(report.amountFen.toString()), [...lineAmounts, subsidy]);
@@ -485,6 +515,7 @@ export class ExpenseReportCommands {
       employeeId,
       company: { name: report.employee.company.name, taxId: report.employee.company.taxId },
       amount: parseFen(report.amountFen.toString()),
+      currency: report.currency,
       applicationId: report.applicationId,
       budgetLineId: report.budgetLineId,
       invoices: report.lines.map((line) => ({
@@ -563,6 +594,9 @@ export class ExpenseReportCommands {
         where: { tenantId_operation_key: { tenantId: 'default', operation, key } },
       });
       if (existing) {
+        if (existing.documentId !== input.reportId) {
+          throw new ExpenseReportError('IDEMPOTENCY_PAYLOAD_MISMATCH', '这个支付编号已经用于另一张单据');
+        }
         return loadReport(tx, existing.documentId);
       }
     }
@@ -595,9 +629,17 @@ export class ExpenseReportCommands {
         return loadReport(tx, report.id);
       }
       action = folded;
+    } else if (this.isSharedDesk(status, input.action)) {
+      await this.assertDeskColleague(tx, status === 'paying' ? 'cashier' : 'finance', report.employee.companyId, input.actorId);
     } else {
-      if (input.action === 'withdraw') {
-        assertWithdrawBeforeApproval(report.votes.filter((vote) => vote.decision === 'approved').length);
+      if (
+        input.action === 'withdraw' &&
+        (status === 'finance_review' ||
+          status === 'paying' ||
+          status === 'paid' ||
+          report.votes.some((vote) => vote.decision === 'approved'))
+      ) {
+        throw new DomainError('WITHDRAW_TOO_LATE', '已有人通过，不能撤回');
       }
       const expected = actorForAction(status, input.action, {
         ownerId: report.employeeId,
@@ -606,25 +648,35 @@ export class ExpenseReportCommands {
       await this.assertExpectedActor(tx, expected, input.actorId);
     }
     if (action === 'start_approval') {
-      const desk = await deskForAmount(tx, parseFen(report.amountFen.toString()));
+      const desk = await deskForAmount(tx, parseFen(report.amountFen.toString()), report.currency);
       if (desk === 'finance') {
         action = 'skip_to_finance';
       }
     }
-    const finance = await tx.employee.findMany({ where: { role: 'finance' } });
-    const cashiers = await tx.employee.findMany({ where: { role: 'cashier' } });
+    let finance: { id: string }[] = [];
+    let cashiers: { id: string }[] = [];
     if (action === 'approve' || action === 'finance_approve' || action === 'start_approval' || action === 'skip_to_finance') {
-      assertSingleRoleAssignee('finance', finance.length);
-      assertSingleRoleAssignee('cashier', cashiers.length);
+      finance = await this.requireCompanyRole(tx, 'finance', report.employee.companyId);
+      cashiers = await this.requireCompanyRole(tx, 'cashier', report.employee.companyId);
     }
     if (action === 'start_approval' && report.approvalMode === 'single' && !report.employee.managerId) {
       throw new ExpenseReportError('MANAGER_NOT_ASSIGNED', '员工没有主管，不能提交');
     }
     let transferTo: string | null = null;
     if (action === 'transfer') {
+      if (input.transferToEmployeeId === input.actorId) {
+        throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '不能转交给自己');
+      }
       const target = await tx.employee.findUnique({ where: { id: input.transferToEmployeeId ?? '' } });
-      if (!target) {
-        throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '转交对象必须是另一名员工');
+      const step = stepForStatus(status);
+      if (!target || target.companyId !== report.employee.companyId) {
+        throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '转交对象必须是同一公司的员工');
+      }
+      if (target.id === report.employeeId) {
+        throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '不能转交给报销人本人');
+      }
+      if (!step || target.role !== step) {
+        throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '只能转交给同一岗位的同事');
       }
       transferTo = target.id;
     }
@@ -638,6 +690,7 @@ export class ExpenseReportCommands {
       }
       nextApproved = applyFinanceAdjustment(status, approved, parseFen(input.approvedAmountFen ?? ''));
       nextAmount = nextApproved;
+      await releaseExcessWriteOff(tx, report.id, nextApproved);
       await retargetReportBudget(tx, report.id, approved, nextApproved);
       if (report.applicationId) {
         await this.retargetApplication(tx, report.applicationId, approved, nextApproved);
@@ -702,19 +755,19 @@ export class ExpenseReportCommands {
     if (action === 'start_approval') {
       await this.openManagerStep(tx, report);
     }
-    if (action === 'skip_to_finance' && finance[0]) {
-      await this.grant(tx, finance[0].id, report.id, 'read', report.id);
-      await this.grant(tx, finance[0].id, report.id, 'decide', decideObjectKey(report.id, 'finance'));
-    }
-    if (action === 'approve' && finance[0]) {
+    if ((action === 'skip_to_finance' || action === 'approve') && finance.length > 0) {
       await this.revokeDecide(tx, report.id);
-      await this.grant(tx, finance[0].id, report.id, 'read', report.id);
-      await this.grant(tx, finance[0].id, report.id, 'decide', decideObjectKey(report.id, 'finance'));
+      for (const person of finance) {
+        await this.grant(tx, person.id, report.id, 'read', report.id);
+        await this.grant(tx, person.id, report.id, 'decide', decideObjectKey(report.id, 'finance'));
+      }
     }
-    if (action === 'finance_approve' && cashiers[0]) {
+    if (action === 'finance_approve' && cashiers.length > 0) {
       await this.revokeDecide(tx, report.id);
-      await this.grant(tx, cashiers[0].id, report.id, 'read', report.id);
-      await this.grant(tx, cashiers[0].id, report.id, 'decide', decideObjectKey(report.id, 'cashier'));
+      for (const person of cashiers) {
+        await this.grant(tx, person.id, report.id, 'read', report.id);
+        await this.grant(tx, person.id, report.id, 'decide', decideObjectKey(report.id, 'cashier'));
+      }
     }
     if (action === 'transfer' && nextActor) {
       const step = stepForStatus(status);
@@ -766,10 +819,18 @@ export class ExpenseReportCommands {
     const mode = report.approvalMode === 'all' ? 'all' : 'any';
     const principalId = mayVote({ mode, actorId, principals, proxies: active });
     const vote = report.votes.find((item) => item.actorId === principalId);
+    const decision = action === 'approve' ? 'approved' : 'rejected';
+    if (vote?.decision === decision) {
+      const decisions = report.votes.map((item) => item.decision) as VoteDecision[];
+      const folded = foldVotes(mode, decisions);
+      if (folded === 'pending') {
+        return null;
+      }
+      return folded === 'approved' ? 'approve' : 'reject';
+    }
     if (!vote || vote.decision !== 'pending') {
       throw new DomainError('ACTOR_FORBIDDEN', '当前员工不能执行这个动作');
     }
-    const decision = action === 'approve' ? 'approved' : 'rejected';
     await tx.approvalVote.update({ where: { id: vote.id }, data: { decision, decidedAt: new Date() } });
     const decisions = report.votes.map((item) => (item.actorId === principalId ? decision : item.decision)) as VoteDecision[];
     const folded = foldVotes(mode, decisions);
@@ -821,7 +882,58 @@ export class ExpenseReportCommands {
     for (const item of report.assignments) {
       await this.grant(tx, item.actorId, report.id, 'read', report.id);
       await this.grant(tx, item.actorId, report.id, 'decide', decideObjectKey(report.id, 'manager'));
+      const proxies = await tx.approvalProxy.findMany({
+        where: { principalId: item.actorId, enabled: true, startsOn: { lte: today }, endsOn: { gte: today } },
+      });
+      for (const proxy of proxies) {
+        await this.grant(tx, proxy.agentId, report.id, 'read', report.id);
+        await this.grant(tx, proxy.agentId, report.id, 'decide', decideObjectKey(report.id, 'manager'));
+      }
     }
+  }
+
+  private isSharedDesk(status: string, action: ExpenseReportAction): boolean {
+    if (status === 'finance_review' && (action === 'finance_approve' || action === 'finance_adjust' || action === 'reject' || action === 'transfer')) {
+      return true;
+    }
+    return status === 'paying' && (action === 'pay_success' || action === 'pay_fail' || action === 'transfer');
+  }
+
+  private async assertDeskColleague(
+    tx: Prisma.TransactionClient,
+    role: 'finance' | 'cashier',
+    companyId: string,
+    actorId: string,
+  ): Promise<void> {
+    const actor = await tx.employee.findUnique({ where: { id: actorId } });
+    if (actor && actor.role === role && actor.companyId === companyId) {
+      return;
+    }
+    const today = todayInShanghai();
+    const proxies = await tx.approvalProxy.findMany({
+      where: { agentId: actorId, enabled: true, startsOn: { lte: today }, endsOn: { gte: today } },
+      select: { principalId: true },
+    });
+    if (proxies.length > 0) {
+      const principal = await tx.employee.findFirst({
+        where: { id: { in: proxies.map((proxy) => proxy.principalId) }, role, companyId },
+        select: { id: true },
+      });
+      if (principal) {
+        return;
+      }
+    }
+    throw new ExpenseReportError('ACTOR_FORBIDDEN', '当前员工不能执行这个动作');
+  }
+
+  private async requireCompanyRole(
+    tx: Prisma.TransactionClient,
+    role: 'finance' | 'cashier',
+    companyId: string,
+  ): Promise<{ id: string }[]> {
+    const rows = await tx.employee.findMany({ where: { role, companyId }, select: { id: true } });
+    assertSingleRoleAssignee(role, rows.length);
+    return rows;
   }
 
   private async retargetApplication(tx: Prisma.TransactionClient, applicationId: string, from: Fen, to: Fen): Promise<void> {

@@ -9,10 +9,12 @@ import {
   crossesYear,
   invoiceAgeDays,
   loanStatusAfterBalance,
+  deskForCurrency,
   matchBuyer,
   matchInvoiceAmount,
-  nextDesk,
   occupyQuota,
+  assertWriteOffWithinReport,
+  compareFen,
   parseFen,
   releaseBudget,
   releaseQuota,
@@ -51,9 +53,9 @@ export async function publishedPolicy(tx: Tx): Promise<{ rules: object[]; skipBe
   };
 }
 
-export async function deskForAmount(tx: Tx, amount: Fen): Promise<'manager' | 'finance'> {
+export async function deskForAmount(tx: Tx, amount: Fen, currency: string): Promise<'manager' | 'finance'> {
   const policy = await publishedPolicy(tx);
-  return nextDesk(amount, policy.skipBelow);
+  return deskForCurrency(currency, amount, policy.skipBelow);
 }
 
 export async function enforceSubmitControls(
@@ -63,6 +65,7 @@ export async function enforceSubmitControls(
     employeeId: string;
     company: { name: string; taxId: string };
     amount: Fen;
+    currency: string;
     applicationId: string | null;
     budgetLineId: string | null;
     invoices: readonly {
@@ -86,6 +89,10 @@ export async function enforceSubmitControls(
     input.today,
   );
   const planned = await tx.loanWriteOff.findMany({ where: { reportId: input.reportId, status: 'planned' } });
+  assertWriteOffWithinReport(
+    input.amount,
+    planned.map((item) => parseFen(item.amountFen.toString())),
+  );
   for (const item of planned) {
     const loan = loans.find((row) => row.id === item.loanId);
     if (!loan || loan.status !== 'outstanding') {
@@ -107,8 +114,11 @@ export async function enforceSubmitControls(
   if (input.applicationId) {
     await tx.$queryRaw`SELECT id FROM applications WHERE id = ${input.applicationId} FOR UPDATE`;
     const application = await tx.application.findUnique({ where: { id: input.applicationId } });
-    if (!application || application.employeeId !== input.employeeId || application.status !== 'approved') {
+    if (!application || application.employeeId !== input.employeeId || (application.status !== 'approved' && application.status !== 'closed')) {
       throw new DomainError('QUOTA_EXCEEDED', '只能占用自己已批准的申请');
+    }
+    if (application.status === 'closed') {
+      throw new DomainError('QUOTA_EXCEEDED', '报销金额超过申请剩余额度');
     }
     const consumed = occupyQuota(
       parseFen(application.amountFen.toString()),
@@ -145,6 +155,12 @@ export async function enforceSubmitControls(
   let oldest = -1;
   let crossYear = false;
   for (const invoice of input.invoices) {
+    if (!invoice.buyerName.trim() || !invoice.buyerTaxId.trim()) {
+      findings.push({ level: 'block', code: 'BUYER_REQUIRED', message: '请填写购买方名称和税号' });
+    }
+    if (!invoice.invoiceDate.trim()) {
+      findings.push({ level: 'block', code: 'INVOICE_DATE_REQUIRED', message: '请填写开票日期' });
+    }
     const buyer = matchBuyer(input.company, invoice);
     if (buyer) {
       findings.push(buyer);
@@ -160,12 +176,54 @@ export async function enforceSubmitControls(
   }
   const policy = await publishedPolicy(tx);
   const ruled = await evaluatePolicyRules(policy.rules, {
-    amountFen: input.amount.toString(),
+    amountFen: input.currency === 'CNY' ? input.amount.toString() : '0',
     crossYear,
     invoiceAgeDays: oldest,
   });
   findings.push(...ruled);
   return assertFindingsAllowSubmit(findings);
+}
+
+export async function releaseExcessWriteOff(tx: Tx, reportId: string, approved: Fen): Promise<void> {
+  const rows = await tx.loanWriteOff.findMany({
+    where: { reportId, status: 'applied' },
+    orderBy: { createdAt: 'desc' },
+  });
+  let total = 0n;
+  for (const row of rows) {
+    total += row.amountFen;
+  }
+  if (compareFen(total as Fen, approved) <= 0) {
+    return;
+  }
+  let excess = ((total as Fen) - approved) as Fen;
+  for (const row of rows) {
+    if (compareFen(excess, parseFen('0')) <= 0) {
+      break;
+    }
+    const amount = parseFen(row.amountFen.toString());
+    const giveBack = compareFen(excess, amount) < 0 ? excess : amount;
+    await tx.$queryRaw`SELECT id FROM loans WHERE id = ${row.loanId} FOR UPDATE`;
+    const loan = await tx.loan.findUnique({ where: { id: row.loanId } });
+    if (!loan) {
+      continue;
+    }
+    const balance = (parseFen(loan.balanceFen.toString()) + giveBack) as Fen;
+    await tx.loan.update({
+      where: { id: loan.id },
+      data: {
+        balanceFen: balance,
+        status: compareFen(balance, parseFen('0')) === 0 ? 'settled' : 'outstanding',
+        version: { increment: 1 },
+      },
+    });
+    const remain = (amount - giveBack) as Fen;
+    await tx.loanWriteOff.update({
+      where: { id: row.id },
+      data: compareFen(remain, parseFen('0')) === 0 ? { status: 'reversed', amountFen: 0n } : { amountFen: remain },
+    });
+    excess = (excess - giveBack) as Fen;
+  }
 }
 
 export async function releaseReportControls(tx: Tx, reportId: string): Promise<void> {

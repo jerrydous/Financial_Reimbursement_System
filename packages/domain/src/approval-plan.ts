@@ -90,6 +90,14 @@ export function nextDesk(amount: Fen, skipManagerBelowFen: Fen | null): 'manager
   return compareFen(amount, skipManagerBelowFen) <= 0 ? 'finance' : 'manager';
 }
 
+/** 免审阈值按人民币分比较。外币金额不跳过主管，避免把日元或美元当成人民币。 */
+export function deskForCurrency(currency: string, amount: Fen, skipManagerBelowFen: Fen | null): 'manager' | 'finance' {
+  if (currency !== 'CNY') {
+    return 'manager';
+  }
+  return nextDesk(amount, skipManagerBelowFen);
+}
+
 export function timeoutNotice(input: { documentId: string; actorId: string; waitingSince: string }): {
   template: 'approval_timeout';
   params: { documentId: string; actorId: string; waitingSince: string };

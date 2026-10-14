@@ -4,7 +4,7 @@ import { compareFen, parseFen, type Fen } from './money';
 export const loanStatuses = ['draft', 'approving', 'outstanding', 'settled'] as const;
 export type LoanStatus = (typeof loanStatuses)[number];
 
-export const loanActions = ['submit', 'approve', 'reject', 'settle'] as const;
+export const loanActions = ['submit', 'approve', 'reject', 'withdraw', 'settle'] as const;
 export type LoanAction = (typeof loanActions)[number];
 
 type Transition = { from: LoanStatus; action: LoanAction; to: LoanStatus };
@@ -14,6 +14,7 @@ export const loanTransitions: readonly Transition[] = [
   { from: 'draft', action: 'submit', to: 'approving' },
   { from: 'approving', action: 'approve', to: 'outstanding' },
   { from: 'approving', action: 'reject', to: 'draft' },
+  { from: 'approving', action: 'withdraw', to: 'draft' },
   { from: 'outstanding', action: 'settle', to: 'settled' },
 ];
 
@@ -23,6 +24,19 @@ export function transitionLoan(from: LoanStatus, action: LoanAction): LoanStatus
     throw new DomainError('INVALID_TRANSITION', `借款单不能从 ${from} 执行 ${action}`);
   }
   return found.to;
+}
+
+export function assertWriteOffWithinReport(reportAmount: Fen, writeOffs: readonly Fen[]): void {
+  let total = parseFen('0');
+  for (const amount of writeOffs) {
+    if (compareFen(amount, parseFen('0')) <= 0) {
+      throw new DomainError('WRITE_OFF_EXCEEDS_BALANCE', '冲销金额必须大于 0');
+    }
+    total = (total + amount) as Fen;
+  }
+  if (compareFen(total, reportAmount) > 0) {
+    throw new DomainError('WRITE_OFF_EXCEEDS_BALANCE', '冲销金额不能超过本次报销');
+  }
 }
 
 export function writeOffLoan(balance: Fen, amount: Fen): Fen {

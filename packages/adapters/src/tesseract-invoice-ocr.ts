@@ -59,7 +59,9 @@ export class TesseractInvoiceOcr {
       }
     } else {
       const worker = await imageWorker();
-      const result = await worker.recognize(file.body);
+      const result = await worker.recognize(file.body).catch(() => {
+        throw new Error('没有从影像里读出文字，请换一张更清晰的图片或手工填写');
+      });
       text = result.data.text;
       if (!readable(text)) {
         throw new Error('没有从影像里读出文字，请换一张更清晰的图片或手工填写');

@@ -40,6 +40,7 @@ export {
 export {
   assertLedgerOpen,
   assertReadyToAttach,
+  assertVerificationAllowsExpense,
   assertVerificationUnverified,
   bindingAfterReportAction,
   confirmRecognition,
@@ -83,6 +84,7 @@ export {
   assertWithdrawBeforeApproval,
   foldVotes,
   mayVote,
+  deskForCurrency,
   nextDesk,
   timeoutNotice,
   type ApprovalMode,
@@ -106,6 +108,7 @@ export {
   loanStatuses,
   loanTransitions,
   transitionLoan,
+  assertWriteOffWithinReport,
   writeOffLoan,
   type LoanAction,
   type LoanStatus,

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseFen } from './money';
 import {
   assertReadyToAttach,
+  assertVerificationAllowsExpense,
   assertVerificationUnverified,
   bindingAfterReportAction,
   sameActiveInvoiceNumber,
@@ -13,6 +14,9 @@ describe('发票', () => {
     expect(assertReadyToAttach('confirmed', parseFen('100'))).toBe(100n);
     expect(() => assertVerificationUnverified('verified')).toThrow(/未验真/);
     assertVerificationUnverified('unverified');
+    assertVerificationAllowsExpense('unverified');
+    assertVerificationAllowsExpense('verified');
+    expect(() => assertVerificationAllowsExpense('failed')).toThrow(/验真未通过/);
   });
 
   it('同一代码和号码视为同一张有效发票，驳回后绑定释放', () => {

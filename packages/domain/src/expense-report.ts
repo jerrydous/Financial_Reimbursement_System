@@ -191,8 +191,8 @@ export function nextActorAfter(
 }
 
 export function assertSingleRoleAssignee(role: 'finance' | 'cashier', count: number): void {
-  if (count !== 1) {
-    throw new ExpenseReportError('ROLE_ASSIGNEE_AMBIGUOUS', `${role === 'finance' ? '财务' : '出纳'}岗必须且只能有一名员工`);
+  if (count < 1) {
+    throw new ExpenseReportError('ROLE_ASSIGNEE_AMBIGUOUS', `本公司的${role === 'finance' ? '财务' : '出纳'}岗至少要有一名员工`);
   }
 }
 
@@ -200,6 +200,9 @@ export function applyFinanceAdjustment(status: ExpenseReportStatus, current: Fen
   transitionExpenseReport(status, 'finance_adjust');
   if (compareFen(next, parseFen('0')) < 0) {
     throw new ExpenseReportError('AMOUNT_NEGATIVE', '批准金额不能为负');
+  }
+  if (compareFen(next, current) > 0) {
+    throw new ExpenseReportError('AMOUNT_MISMATCH', '批准金额不能高于当前批准金额');
   }
   return next;
 }

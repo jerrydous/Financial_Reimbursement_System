@@ -1,5 +1,5 @@
 import { DomainError } from './domain-error';
-import { fenToYuanText, parseFen, type Fen } from './money';
+import { minorToAmountText, parseFen, type Fen } from './money';
 
 export type VoucherLine = {
   explanation: string;
@@ -20,6 +20,7 @@ export function voucherFromPaidReport(input: {
   status: string;
   paidOn: string;
   amount: Fen;
+  currency?: string;
   explanation: string;
 }): VoucherDraft {
   if (input.status !== 'paid') {
@@ -28,7 +29,7 @@ export function voucherFromPaidReport(input: {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.paidOn)) {
     throw new DomainError('REQUEST_INVALID', '凭证日期不合法');
   }
-  const yuan = fenToYuanText(input.amount);
+  const yuan = minorToAmountText(input.amount, input.currency ?? 'CNY');
   parseFen(input.amount.toString());
   return {
     formId: 'GL_VOUCHER',
