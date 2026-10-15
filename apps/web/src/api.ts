@@ -210,6 +210,37 @@ export async function verifyInvoice(id: string, idempotencyKey: string): Promise
   );
 }
 
+export type VerificationSetting = {
+  provider: 'off' | 'tencent' | 'custom';
+  baseUrl: string;
+  model: string;
+  region: string;
+  secretId: string;
+  apiKeySet: boolean;
+  apiKeyHint: string;
+};
+
+export async function getVerificationSetting(): Promise<VerificationSetting> {
+  return read(await request('/verification-settings'));
+}
+
+export async function saveVerificationSetting(input: {
+  provider: VerificationSetting['provider'];
+  baseUrl: string;
+  model: string;
+  region: string;
+  secretId: string;
+  apiKey: string;
+}): Promise<VerificationSetting> {
+  return read(
+    await request('/verification-settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    }),
+  );
+}
+
 export async function createLedgerExport(idempotencyKey: string): Promise<ExportJob> {
   return read(
     await request('/invoice-ledger/exports', {

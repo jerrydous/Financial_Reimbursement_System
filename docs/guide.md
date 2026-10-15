@@ -54,7 +54,7 @@ TENCENT_OCR_REGION=ap-guangzhou
 
 差标由 json-rules-engine 执行已发布规则。金额比较用整数分，不经过浮点。强控阻断提交，弱控写入报销单上的警告。补贴按城市、职级和天数相乘。分摊按权重算到分，尾差进金额最大的一行。
 
-查验使用腾讯云 `VatInvoiceVerify`。`VERIFY_PROVIDER=tencent` 且配置了密钥才会把发票标成验真通过。超时会记一次未完成的查验并放进 BullMQ 重试，不会另建一张发票。金蝶地址留空时，凭证接口只返回报文。商旅导入接受携程、滴滴的订单 JSON。
+查验可以在「验真配置」里由财务填写腾讯云密钥，或填写自定义模型的地址、模型名和 API Key。没有页面配置时，才使用腾讯云 `VatInvoiceVerifyNew`：`VERIFY_PROVIDER=tencent` 且配置了密钥才会把发票标成验真通过。超时会记一次未完成的查验并放进 BullMQ 重试，不会另建一张发票。金蝶地址留空时，凭证接口只返回报文。商旅导入接受携程、滴滴的订单 JSON。
 
 ## 测试
 

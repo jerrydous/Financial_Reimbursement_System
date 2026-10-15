@@ -8,6 +8,8 @@ import {
   financeAdjustmentSchema,
   invoiceListSchema,
   invoiceViewSchema,
+  saveVerificationSettingSchema,
+  verificationSettingViewSchema,
 } from './index';
 
 type ZodDef = {
@@ -84,6 +86,13 @@ export function buildOpenApiDocument(): Record<string, unknown> {
       },
       '/expense-reports/{id}': { get: { responses: { '200': jsonResponse(expenseReportDetailSchema) } } },
       '/invoices': { get: { responses: { '200': jsonResponse(invoiceListSchema) } } },
+      '/verification-settings': {
+        get: { responses: { '200': jsonResponse(verificationSettingViewSchema) } },
+        put: {
+          requestBody: { content: { 'application/json': { schema: zodToSchema(saveVerificationSettingSchema) } } },
+          responses: { '200': jsonResponse(verificationSettingViewSchema) },
+        },
+      },
       '/invoices/{id}/confirm': {
         post: {
           requestBody: { content: { 'application/json': { schema: zodToSchema(confirmInvoiceSchema) } } },
