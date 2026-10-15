@@ -630,7 +630,9 @@ export class ExpenseReportCommands {
       }
       action = folded;
     } else if (this.isSharedDesk(status, input.action)) {
-      await this.assertDeskColleague(tx, status === 'paying' ? 'cashier' : 'finance', report.employee.companyId, input.actorId);
+      if (report.currentActorId !== input.actorId) {
+        await this.assertDeskColleague(tx, status === 'paying' ? 'cashier' : 'finance', report.employee.companyId, input.actorId);
+      }
     } else {
       if (
         input.action === 'withdraw' &&
@@ -675,8 +677,8 @@ export class ExpenseReportCommands {
       if (target.id === report.employeeId) {
         throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '不能转交给报销人本人');
       }
-      if (!step || target.role !== step) {
-        throw new ExpenseReportError('TRANSFER_TARGET_INVALID', '只能转交给同一岗位的同事');
+      if (!step) {
+        throw new ExpenseReportError('INVALID_TRANSITION', '当前状态不能转交');
       }
       transferTo = target.id;
     }

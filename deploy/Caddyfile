@@ -1,0 +1,11 @@
+{$CADDY_SITE:80} {
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+	handle /auth/* {
+		reverse_proxy keycloak:8080
+	}
+	handle {
+		reverse_proxy web:5173
+	}
+}

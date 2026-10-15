@@ -1,5 +1,5 @@
 // 开源识票：PDF 先取文字层，图片交给 tesseract.js。字段对应不依赖云厂商。
-import { pairsFromInvoiceText } from '@frs/domain';
+import { invoiceTextFromGlyphs, pairsFromInvoiceText } from '@frs/domain';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 
@@ -39,7 +39,16 @@ async function textFromPdf(body: Buffer): Promise<string> {
   try {
     const page = await doc.getPage(1);
     const content = await page.getTextContent();
-    return content.items.map((item) => item.str ?? '').join('\n');
+    return invoiceTextFromGlyphs(
+      content.items.map((item) => {
+        const positioned = item as { str?: string; transform?: number[] };
+        return {
+          str: positioned.str ?? '',
+          x: positioned.transform?.[4] ?? 0,
+          y: positioned.transform?.[5] ?? 0,
+        };
+      }),
+    );
   } finally {
     await doc.destroy();
   }

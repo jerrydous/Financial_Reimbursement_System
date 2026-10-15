@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { colleagueListSchema } from '@frs/contracts';
 import type { AccessTokenClaims } from '@frs/domain';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma.service';
@@ -65,6 +66,26 @@ describe('员工只看到自己的身份', () => {
     });
     await expect(new EmployeeService(prisma).getOwn(claims)).rejects.toBeInstanceOf(ForbiddenException);
     expect(updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('转交名单是同公司的其他账号', () => {
+  it('按姓名返回 items，排除自己', async () => {
+    const findUnique = vi.fn().mockResolvedValue({ id: 'self', companyId: '22222222-2222-4222-8222-222222222222' });
+    const findMany = vi.fn().mockResolvedValue([
+      { id: '33333333-3333-4333-8333-333333333334', name: '示例主管', role: 'manager' },
+      { id: '33333333-3333-4333-8333-333333333335', name: '示例财务', role: 'finance' },
+    ]);
+    const prisma = { employee: { findUnique, findMany } } as unknown as PrismaService;
+
+    const list = await new EmployeeService(prisma).listColleagues('self');
+
+    expect(colleagueListSchema.parse(list).items.map((person) => person.name)).toEqual(['示例主管', '示例财务']);
+    expect(findMany).toHaveBeenCalledWith({
+      where: { companyId: '22222222-2222-4222-8222-222222222222', NOT: { id: 'self' } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, role: true },
+    });
   });
 });
 

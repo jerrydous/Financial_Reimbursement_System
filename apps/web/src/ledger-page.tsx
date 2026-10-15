@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { App as AntdApp, Button, Dropdown, Modal, Select, Table, Typography } from 'antd';
+import { App as AntdApp, Button, Dropdown, Modal, Table, Typography } from 'antd';
 import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { classifyInvoice, createExpenseReport, createLedgerExport, listColleagues, listInvoices, submitExpenseReport, transferInvoice, verifyInvoice } from './api';
-import { formatMoney, roleLabel, verificationLabel } from './labels';
+import { formatMoney, verificationLabel } from './labels';
+import { TransferChoices } from './transfer-choices';
 
 const buckets = [
   { key: 'unreimbursed', label: '未报销' },
@@ -207,16 +208,12 @@ export function LedgerPage({ enabled }: { enabled: boolean }) {
         onCancel={() => setTransferOpen(false)}
         onOk={() => void transfer.mutateAsync()}
       >
-        <Select
-          style={{ width: '100%' }}
-          placeholder="选择同事"
+        <TransferChoices
           loading={colleagues.isLoading}
+          error={colleagues.error instanceof Error ? colleagues.error.message : ''}
+          people={colleagues.data ?? []}
           value={transferTo}
           onChange={setTransferTo}
-          options={(colleagues.data ?? []).map((person) => ({
-            value: person.id,
-            label: `${person.name} · ${roleLabel[person.role] ?? person.role}`,
-          }))}
         />
       </Modal>
     </section>
