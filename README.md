@@ -162,9 +162,15 @@ API 校验访问令牌，并把 Keycloak 用户映射到员工。员工看自己
 
 ### 发票查验
 
-账本里，已确认且仍是「未验真」的发票可以点「查验」。只有查验服务返回的发票号码和单据上的号码一致时，状态才会变成验真通过。空结果和失败都保持未通过。
+账本里，已确认且仍是「未验真」的发票可以点「查验」。只有查验结果里的发票号码和单据上的号码一致时，状态才会变成验真通过。空结果和失败都保持未通过。
 
-查验走腾讯云文字识别的 `VatInvoiceVerifyNew`（增值税发票核验，新版），域名 `ocr.tencentcloudapi.com`，版本 `2018-11-19`。需要：
+财务打开「验真配置」，为本公司选择入口并填写自己的 API Key。密钥加密后保存在服务器，页面只显示末四位，不会出现在请求日志里。
+
+- 腾讯云查验：填写 SecretId、SecretKey 和地域。调用增值税发票核验 `VatInvoiceVerifyNew`。
+- 自定义模型：填写接口地址、模型名称和 API Key。查验时向该地址的 `/chat/completions` 发送 OpenAI 兼容请求，`Authorization` 使用 `Bearer`。模型返回 JSON：`found`、`invoiceNumber`、`buyerName`、`buyerTaxId`、`message`。`found` 不为 true，或号码对不上，都记为未通过。这是你自己的模型入口，不是税务局直连。
+- 不启用：本公司不再查验。已经保存为不启用后，下面的环境变量也不会再被使用。
+
+还没有保存过配置时，仍可以使用环境变量：
 
 ```bash
 VERIFY_PROVIDER=tencent
@@ -173,9 +179,11 @@ TENCENT_SECRET_KEY=你的密钥
 TENCENT_OCR_REGION=ap-guangzhou
 ```
 
-`VERIFY_PROVIDER` 不是 `tencent`，或密钥为空时，接口返回「未配置查验服务，发票保持未验真」。当前 `docker-compose.yml` 只把识票变量传给 API。用 compose 查验时，要在 `api.environment` 里加上 `VERIFY_PROVIDER: ${VERIFY_PROVIDER:-}`。
+生产环境请设置 `VERIFICATION_DATA_KEY`（至少 16 位），用来加密页面上保存的 API Key。未设置时按本地开发处理。
 
-接口要求发票号码和开票日期（`YYYY-MM-DD`，近五年）。专票等票种要不含税金额，全电票要价税合计，普票还要校验码后 6 位。现有调用提交发票代码、号码、开票日期和价税合计，没有校验码。税务局没有对这个应用开放的公开查验 API；企业直连要另走乐企资质，本仓库没有接乐企。
+`VERIFY_PROVIDER` 不是 `tencent`，或密钥为空，且页面也没有可用配置时，接口返回「未配置查验服务，发票保持未验真」。当前 `docker-compose.yml` 只把识票变量传给 API。用 compose 走环境变量查验时，要在 `api.environment` 里加上 `VERIFY_PROVIDER: ${VERIFY_PROVIDER:-}`。
+
+接口要求发票号码和开票日期（`YYYY-MM-DD`，近五年）。专票等票种要不含税金额，全电票要价税合计，普票还要校验码后 6 位。现有腾讯云调用提交发票代码、号码、开票日期和价税合计，没有校验码。税务局没有对这个应用开放的公开查验 API；企业直连要另走乐企资质，本仓库没有接乐企。
 
 查验超时会记一次未完成的尝试。配置了 `REDIS_URL` 时，BullMQ 队列 `frs-tasks` 按幂等键重试，最多 5 次，指数退避从 1 秒开始。超时不会把发票标成通过，也不会另建一张发票。
 
@@ -257,8 +265,9 @@ apps/worker       Temporal Worker，任务队列 expense
 | `INTERNAL_TOKEN` | Worker 调用 API 内部接口的令牌 |
 | `REDIS_URL` | 查验重试和台账导出。留空则这些异步任务不可用 |
 | `OCR_PROVIDER` | `tesseract`、`tencent`、`off` |
-| `VERIFY_PROVIDER` | 设为 `tencent` 才查验 |
+| `VERIFY_PROVIDER` | 公司还没在「验真配置」里保存时，设为 `tencent` 才用环境变量查验 |
 | `TENCENT_SECRET_ID`、`TENCENT_SECRET_KEY`、`TENCENT_OCR_REGION` | 腾讯云密钥。不要写进仓库 |
+| `VERIFICATION_DATA_KEY` | 加密页面上保存的 API Key。生产环境至少 16 位 |
 | `KINGDEE_BASE_URL` | 留空只生成凭证报文 |
 | `TRAVEL_PULL_URL` | 留空只接收页面提交的订单 JSON |
 

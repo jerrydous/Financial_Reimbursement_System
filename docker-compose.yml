@@ -119,6 +119,7 @@ services:
       TENCENT_SECRET_ID: ${TENCENT_SECRET_ID:-}
       TENCENT_SECRET_KEY: ${TENCENT_SECRET_KEY:-}
       TENCENT_OCR_REGION: ${TENCENT_OCR_REGION:-ap-guangzhou}
+      VERIFICATION_DATA_KEY: ${VERIFICATION_DATA_KEY:-}
     ports:
       - "3000:3000"
     healthcheck:

@@ -19,6 +19,8 @@ import {
   type VerificationDecision,
 } from '@frs/domain';
 import { VerificationNotConfigured, VerificationTimeout } from '@frs/adapters';
+import { openSecret } from './verification-secret';
+import { verifierForSetting } from './verification-runtime';
 import { logger } from '../logging';
 import { PrismaService } from '../prisma.service';
 import { isUniqueViolation } from '../expense-reports/http-error';
@@ -248,7 +250,8 @@ export class InvoiceCommands {
     const beforeCount = await this.prisma.invoice.count({ where: { ownerEmployeeId } });
     let decision: VerificationDecision;
     try {
-      decision = await this.verifier.verify({
+      const verifier = await this.verifierFor(ownerEmployeeId);
+      decision = await verifier.verify({
         invoiceCode: invoice.invoiceCode,
         invoiceNumber: invoice.invoiceNumber,
         invoiceDate: invoice.invoiceDate,
@@ -256,7 +259,8 @@ export class InvoiceCommands {
       });
     } catch (error) {
       if (error instanceof VerificationNotConfigured || (error instanceof Error && error.name === 'VerificationNotConfigured')) {
-        throw new ExpenseReportError('VERIFICATION_NOT_CONFIGURED', '未配置查验服务，发票保持未验真');
+        const message = error instanceof Error && error.message ? error.message : '未配置查验服务，发票保持未验真';
+        throw new ExpenseReportError('VERIFICATION_NOT_CONFIGURED', message);
       }
       if (error instanceof VerificationTimeout || (error instanceof Error && error.name === 'VerificationTimeout')) {
         await this.saveAttempt(invoice.id, key, 'pending', '查验超时');
@@ -284,6 +288,31 @@ export class InvoiceCommands {
       throw new ExpenseReportError('INVOICE_ALREADY_BOUND', '查验不能新增发票');
     }
     return toInvoiceView(updated);
+  }
+
+  private async verifierFor(ownerEmployeeId: string) {
+    const owner = await this.prisma.employee.findUnique({
+      where: { id: ownerEmployeeId },
+      select: { companyId: true },
+    });
+    if (!owner) {
+      return this.verifier;
+    }
+    const setting = await this.prisma.verificationSetting.findUnique({ where: { companyId: owner.companyId } });
+    if (!setting) {
+      return this.verifier;
+    }
+    return verifierForSetting(
+      {
+        provider: setting.provider,
+        baseUrl: setting.baseUrl,
+        model: setting.model,
+        region: setting.region,
+        secretId: setting.secretId,
+        apiKey: setting.provider === 'off' ? '' : openSecret(setting.apiKey),
+      },
+      this.verifier,
+    );
   }
 
   private async saveAttempt(invoiceId: string, idempotencyKey: string, status: string, message: string): Promise<void> {

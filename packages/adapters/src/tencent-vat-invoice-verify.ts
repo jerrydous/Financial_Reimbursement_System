@@ -9,8 +9,8 @@ export class VerificationTimeout extends Error {
 }
 
 export class VerificationNotConfigured extends Error {
-  constructor() {
-    super('未配置腾讯云密钥，不能查验发票');
+  constructor(message = '未配置查验服务，发票保持未验真') {
+    super(message);
     this.name = 'VerificationNotConfigured';
   }
 }
@@ -97,7 +97,7 @@ export class TencentVatInvoiceVerify {
         status: 'failed',
         buyerName: '',
         buyerTaxId: '',
-        message: message || '查验没有返回这张发票',
+        message: safeVerifyMessage(message || '查验没有返回这张发票', this.options.secretId, this.options.secretKey),
       };
     }
   }
@@ -120,4 +120,14 @@ export function createInvoiceVerifierFromEnv(): {
     region: process.env.TENCENT_OCR_REGION ?? 'ap-guangzhou',
   });
   return { verify: (input) => verifier.verify(input) };
+}
+
+function safeVerifyMessage(message: string, ...secrets: string[]): string {
+  let text = message;
+  for (const secret of secrets) {
+    if (secret) {
+      text = text.split(secret).join('');
+    }
+  }
+  return text.slice(0, 200);
 }

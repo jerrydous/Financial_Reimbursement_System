@@ -9,6 +9,7 @@ import { formatWhen, roleLabel, shortNo, statusLabel } from './labels';
 import { LedgerPage } from './ledger-page';
 import { ApplicationCreatePage, BudgetPage, ContractCreatePage, CorporatePage, LoanCreatePage, ProxyPage, TravelPage } from './control-pages';
 import { NewReportPage, ReportDetailPage, ReportListPage } from './report-pages';
+import { VerificationSettingsPage } from './verification-page';
 
 const { Header, Content, Sider } = Layout;
 
@@ -73,7 +74,9 @@ function Shell({ authenticated, authDown, authError }: { authenticated: boolean;
     enabled: authenticated,
     queryFn: getMe,
   });
-  const selected = location.pathname.startsWith('/approvals')
+  const selected = location.pathname.startsWith('/verification')
+    ? '/verification'
+    : location.pathname.startsWith('/approvals')
     ? '/approvals'
     : location.pathname.startsWith('/ledger')
       ? '/ledger'
@@ -125,6 +128,7 @@ function Shell({ authenticated, authDown, authError }: { authenticated: boolean;
               { key: '/budgets', label: <Link to="/budgets">预算</Link> },
               { key: '/corporate', label: <Link to="/corporate">对公付款</Link> },
               { key: '/travel', label: <Link to="/travel">商旅订单</Link> },
+              ...(me.data?.role === 'finance' ? [{ key: '/verification', label: <Link to="/verification">验真配置</Link> }] : []),
               { key: '/approvals', label: <Link to="/approvals">待我处理</Link> },
             ]}
           />
@@ -145,6 +149,7 @@ function Shell({ authenticated, authDown, authError }: { authenticated: boolean;
             <Route path="/budgets" element={<BudgetPage />} />
             <Route path="/corporate" element={<CorporatePage />} />
             <Route path="/travel" element={<TravelPage />} />
+            <Route path="/verification" element={<VerificationSettingsPage />} />
             <Route path="/proxies" element={<ProxyPage />} />
             <Route path="/approvals" element={<ReportListPage enabled={authenticated} inbox />} />
           </Routes>

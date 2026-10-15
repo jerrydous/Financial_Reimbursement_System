@@ -8,13 +8,31 @@ datasource db {
 }
 
 model Company {
-  id        String     @id
-  tenantId  String     @default("default") @map("tenant_id")
-  name      String
-  taxId     String     @map("tax_id")
-  employees Employee[]
+  id                  String               @id
+  tenantId            String               @default("default") @map("tenant_id")
+  name                String
+  taxId               String               @map("tax_id")
+  employees           Employee[]
+  verificationSetting VerificationSetting?
 
   @@map("companies")
+}
+
+model VerificationSetting {
+  id        String   @id
+  tenantId  String   @default("default") @map("tenant_id")
+  companyId String   @unique @map("company_id")
+  company   Company  @relation(fields: [companyId], references: [id])
+  provider  String   @default("off")
+  baseUrl   String   @default("") @map("base_url")
+  model     String   @default("")
+  region    String   @default("ap-guangzhou")
+  secretId  String   @default("") @map("secret_id")
+  apiKey    String   @default("") @map("api_key")
+  updatedBy String   @default("") @map("updated_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("verification_settings")
 }
 
 model Employee {

@@ -21,6 +21,8 @@ import { InternalJobsController } from './documents/internal-jobs.controller';
 import { HealthController } from './health.controller';
 import { InvoiceCommands } from './invoices/invoice-commands';
 import { InvoicesController } from './invoices/invoices.controller';
+import { VerificationSettingsCommands } from './invoices/verification-settings';
+import { VerificationSettingsController } from './invoices/verification-settings.controller';
 import { OpenApiController } from './openapi.controller';
 import { PrismaService } from './prisma.service';
 
@@ -32,6 +34,7 @@ import { PrismaService } from './prisma.service';
     ExpenseReportsController,
     InternalDecisionController,
     InvoicesController,
+    VerificationSettingsController,
     DocumentsController,
     InternalJobsController,
   ],
@@ -39,6 +42,7 @@ import { PrismaService } from './prisma.service';
     PrismaService,
     EmployeeService,
     ExpenseReportsService,
+    VerificationSettingsCommands,
     {
       provide: InvoiceCommands,
       inject: [PrismaService],
