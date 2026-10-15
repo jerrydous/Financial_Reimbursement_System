@@ -45,6 +45,7 @@ export {
   bindingAfterReportAction,
   confirmRecognition,
   draftFromVatPairs,
+  invoiceTextFromGlyphs,
   pairsFromInvoiceText,
   invoiceVerificationStatus,
   ledgerBucket,

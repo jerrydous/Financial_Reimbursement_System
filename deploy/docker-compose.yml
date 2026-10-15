@@ -53,7 +53,7 @@ services:
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
       KC_HTTP_ENABLED: "true"
       KC_HTTP_RELATIVE_PATH: /auth
-      KC_HOSTNAME: ${PUBLIC_ORIGIN:?在 deploy/.env 设置 PUBLIC_ORIGIN}
+      KC_HOSTNAME: ${PUBLIC_ORIGIN:?在 deploy/.env 设置 PUBLIC_ORIGIN}/auth
       KC_HOSTNAME_STRICT: "false"
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
@@ -83,6 +83,7 @@ services:
       POSTGRES_SEEDS: postgres
       DBNAME: temporal
       VISIBILITY_DBNAME: temporal_visibility
+      BIND_ON_IP: 0.0.0.0
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
       interval: 10s
@@ -177,6 +178,8 @@ services:
 
   edge:
     image: caddy:2-alpine
+    environment:
+      CADDY_SITE: ${CADDY_SITE:-:80}
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"

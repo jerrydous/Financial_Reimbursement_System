@@ -18,6 +18,7 @@ import {
   type ExpenseReportDetail,
 } from './api';
 import { InvoicePreview, useInvoicePreview } from './invoice-preview';
+import { TransferChoices } from './transfer-choices';
 import { actionLabel, currencyOptions, formatMoney, formatWhen, isActiveStatus, roleLabel, shortNo, statusLabel, verificationLabel } from './labels';
 
 const documentTabs = [
@@ -273,6 +274,10 @@ export function ReportListPage({ enabled, inbox }: { enabled: boolean; inbox: bo
             render: (amountFen: string, row) => formatMoney(amountFen, row.currency),
           },
           { title: '创建时间', dataIndex: 'createdAt', render: (value: string) => formatWhen(value) },
+          {
+            title: '操作',
+            render: (_value: unknown, row) => (row.status === 'draft' ? <Link to={`/expense-reports/${row.id}`}>继续</Link> : null),
+          },
         ]}
       />
       )}
@@ -659,16 +664,12 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
           void act.mutateAsync({ action: 'transfer', body: { transferToEmployeeId: transferTo } });
         }}
       >
-        <Select
-          style={{ width: '100%' }}
-          placeholder="选择同事"
+        <TransferChoices
           loading={colleagues.isLoading}
+          error={colleagues.error instanceof Error ? colleagues.error.message : ''}
+          people={(colleagues.data ?? []).filter((person) => person.id !== current.employeeId)}
           value={transferTo}
           onChange={setTransferTo}
-          options={(colleagues.data ?? []).map((person) => ({
-            value: person.id,
-            label: `${person.name} · ${roleLabel[person.role] ?? person.role}`,
-          }))}
         />
       </Modal>
       <Modal
@@ -711,6 +712,9 @@ type DetailAction = {
 function detailActions(current: ExpenseReportDetail, mine: boolean, owner: boolean): { primary: DetailAction | null; more: DetailAction[] } {
   const more: DetailAction[] = [];
   let primary: DetailAction | null = null;
+  if (current.status === 'draft' && owner) {
+    primary = { key: 'submit', label: '提交', action: 'submit', keySuffix: 'submit' };
+  }
   if (current.status === 'approving' && mine) {
     primary = { key: 'approve', label: '同意', action: 'approve' };
   }

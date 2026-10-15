@@ -166,21 +166,120 @@ export function pairsFromInvoiceText(text: string): VatInvoicePair[] {
   if (amountValue && (source.includes('价税合计') || source.includes('小写'))) {
     pairs.push({ name: '价税合计(小写)', value: amountValue.replace(/\s/g, '') });
   }
-  const seller = source.match(/销售方[\s\S]{0,80}?名称[:：]\s*([^\n]{2,80})/);
-  const sellerName = usableSeller(seller?.[1] ?? '') || companyName(source);
-  if (sellerName) {
-    pairs.push({ name: '销售方名称', value: sellerName });
+  const parties = readParties(source);
+  if (parties.sellerName) {
+    pairs.push({ name: '销售方名称', value: parties.sellerName });
   }
-  const buyer = source.match(/购买方[\s\S]{0,160}?名称[:：]\s*([^\n]{2,80})/);
-  const buyerName = usableSeller(buyer?.[1] ?? '');
-  if (buyerName) {
-    pairs.push({ name: '购买方名称', value: buyerName });
+  if (parties.buyerName) {
+    pairs.push({ name: '购买方名称', value: parties.buyerName });
   }
-  const buyerTax = source.match(/购买方[\s\S]{0,220}?纳税人识别号[:：\s]*([0-9A-Za-z]{15,20})/);
-  if (buyerTax?.[1]) {
-    pairs.push({ name: '购买方税号', value: buyerTax[1].toUpperCase() });
+  if (parties.buyerTaxId) {
+    pairs.push({ name: '购买方税号', value: parties.buyerTaxId });
   }
   return pairs;
+}
+
+/** 数电票常把购买方、销售方印在同一行的左右两列。按出现顺序成对取值，避免把左列购买方当成销售方。 */
+function readParties(source: string): { buyerName: string; sellerName: string; buyerTaxId: string } {
+  const buyerAt = source.search(/购买方|购方/);
+  const sellerAt = source.search(/销售方|销方/);
+  if (buyerAt < 0 && sellerAt < 0) {
+    const block = partyBlock(source);
+    const names = namesIn(block);
+    const taxes = taxIdsIn(block);
+    return { buyerName: names[0] ?? '', sellerName: names[1] ?? '', buyerTaxId: taxes[0] ?? '' };
+  }
+  const buyerFirst = buyerAt >= 0 && (sellerAt < 0 || buyerAt < sellerAt);
+  const sameLine =
+    buyerAt >= 0 && sellerAt >= 0 && !source.slice(Math.min(buyerAt, sellerAt), Math.max(buyerAt, sellerAt)).includes('\n');
+  if (sameLine) {
+    const block = partyBlock(source.slice(Math.max(buyerAt, sellerAt)));
+    const names = namesIn(block);
+    const taxes = taxIdsIn(block);
+    return {
+      buyerName: (buyerFirst ? names[0] : names[1]) ?? '',
+      sellerName: (buyerFirst ? names[1] : names[0]) ?? '',
+      buyerTaxId: (buyerFirst ? taxes[0] : taxes[1]) ?? '',
+    };
+  }
+  if (buyerAt >= 0 && sellerAt > buyerAt) {
+    return {
+      buyerName: namesIn(source.slice(buyerAt, sellerAt))[0] ?? '',
+      sellerName: namesIn(partyBlock(source.slice(sellerAt)))[0] ?? '',
+      buyerTaxId: taxIdsIn(source.slice(buyerAt, sellerAt))[0] ?? '',
+    };
+  }
+  if (sellerAt >= 0 && buyerAt > sellerAt) {
+    return {
+      sellerName: namesIn(source.slice(sellerAt, buyerAt))[0] ?? '',
+      buyerName: namesIn(partyBlock(source.slice(buyerAt)))[0] ?? '',
+      buyerTaxId: taxIdsIn(partyBlock(source.slice(buyerAt)))[0] ?? '',
+    };
+  }
+  const only = partyBlock(source.slice(Math.max(buyerAt, sellerAt)));
+  return buyerAt >= 0
+    ? { buyerName: namesIn(only)[0] ?? '', sellerName: '', buyerTaxId: taxIdsIn(only)[0] ?? '' }
+    : { buyerName: '', sellerName: namesIn(only)[0] ?? '', buyerTaxId: '' };
+}
+
+function partyBlock(text: string): string {
+  const stop = text.search(/项目名称|货物或应税|规格型号|价税合计/);
+  return stop >= 0 ? text.slice(0, stop) : text.slice(0, 500);
+}
+
+function namesIn(block: string): string[] {
+  const names: string[] = [];
+  const lines = block.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+    if (!line.includes('名称')) {
+      continue;
+    }
+    const parts = line.split(/名称[:：]?/).slice(1);
+    let taken = false;
+    for (const part of parts) {
+      const name = usableSeller((part.split(/纳税人|统一社会/)[0] ?? '').trim());
+      if (name) {
+        names.push(name);
+        taken = true;
+      }
+    }
+    if (!taken) {
+      const next = usableSeller(lines[index + 1] ?? '');
+      if (next && !next.includes('名称')) {
+        names.push(next);
+        index += 1;
+      }
+    }
+  }
+  return names;
+}
+
+function taxIdsIn(block: string): string[] {
+  return [...block.matchAll(/纳税人识别号[:：\s]*([0-9A-Za-z]{15,20})/g)].map((match) => (match[1] ?? '').toUpperCase());
+}
+
+/** PDF 文字层经常一个字一块。按纵坐标拼成行，同一行再按从左到右连接。 */
+export function invoiceTextFromGlyphs(items: readonly { str: string; x: number; y: number }[]): string {
+  const glyphs = items.filter((item) => item.str.trim().length > 0);
+  const sorted = [...glyphs].sort((left, right) => right.y - left.y || left.x - right.x);
+  const lines: { y: number; parts: { str: string; x: number; y: number }[] }[] = [];
+  for (const glyph of sorted) {
+    const line = lines.find((entry) => Math.abs(entry.y - glyph.y) <= 2);
+    if (line) {
+      line.parts.push(glyph);
+    } else {
+      lines.push({ y: glyph.y, parts: [glyph] });
+    }
+  }
+  return lines
+    .map((line) =>
+      line.parts
+        .sort((left, right) => left.x - right.x)
+        .map((part) => part.str)
+        .join(' '),
+    )
+    .join('\n');
 }
 
 function collapseGlyphSpaces(text: string): string {
@@ -203,11 +302,6 @@ function usableSeller(value: string): string {
     return '';
   }
   return name;
-}
-
-function companyName(text: string): string {
-  const names = [...text.matchAll(/[一-龥（）()]{2,40}公司/g)].map((match) => match[0]);
-  return names.at(-1) ?? '';
 }
 
 function largestMoney(text: string): string {
