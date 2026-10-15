@@ -20,6 +20,12 @@ export {
   decideVatVerify,
   readVatVerifyFields,
 } from './tencent-vat-invoice-verify';
+export {
+  CustomModelInvoiceVerify,
+  customVerifyUrl,
+  decisionFromCustomBody,
+  normalizeCustomBaseUrl,
+} from './custom-model-invoice-verify';
 export { KingdeeVoucherExport, buildVoucherPayload, createVoucherExportFromEnv } from './voucher-export';
 export { TravelOrderPull, createTravelPullFromEnv, mapTravelOrder } from './travel-order';
 export { BullTaskQueue, createTaskQueueFromEnv, type TaskData, type TaskName } from './verification-queue';

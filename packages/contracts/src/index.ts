@@ -329,6 +329,27 @@ export const exportJobSchema = z.object({
   downloadPath: z.string(),
 });
 
+export const verificationProviderSchema = z.enum(['off', 'tencent', 'custom']);
+
+export const verificationSettingViewSchema = z.object({
+  provider: verificationProviderSchema,
+  baseUrl: z.string(),
+  model: z.string(),
+  region: z.string(),
+  secretId: z.string(),
+  apiKeySet: z.boolean(),
+  apiKeyHint: z.string(),
+});
+
+export const saveVerificationSettingSchema = z.object({
+  provider: verificationProviderSchema,
+  baseUrl: z.string().max(300).default(''),
+  model: z.string().max(120).default(''),
+  region: z.string().max(32).default(''),
+  secretId: z.string().max(128).default(''),
+  apiKey: z.string().max(512).default(''),
+});
+
 export { buildOpenApiDocument } from './openapi';
 
 export type PageQuery = z.infer<typeof pageQuerySchema>;
@@ -344,3 +365,5 @@ export type DocumentList = z.infer<typeof documentListSchema>;
 export type BudgetLineView = z.infer<typeof budgetLineViewSchema>;
 export type ProxyView = z.infer<typeof proxyViewSchema>;
 export type ExportJob = z.infer<typeof exportJobSchema>;
+export type VerificationSettingView = z.infer<typeof verificationSettingViewSchema>;
+export type SaveVerificationSetting = z.infer<typeof saveVerificationSettingSchema>;
