@@ -1,4 +1,7 @@
-/* Ocean Depths（theme-factory）：海军蓝正文、奶油底、青绿强调。中文回落到 Noto Sans CJK SC。 */
+/* Ocean Depths（theme-factory themes/ocean-depths.md）
+   深海军蓝 #1a2332 作主表面，奶油 #f1faee 作浅底，青绿 #2d8b8b 作强调，海沫 #a8dadc 作浅强调。
+   标题 DejaVu Sans Bold，正文 DejaVu Sans。中文回落 Noto Sans CJK SC。
+   青绿铺在奶油或白底上对比不足 4.5:1，不用于 13–15px 正文。注释用海军蓝 78% 叠在奶油上的实色 #49525b。 */
 
 html,
 body,
@@ -13,7 +16,7 @@ body {
   font-family: "DejaVu Sans", "Noto Sans CJK SC", sans-serif;
   font-size: 15px;
   font-weight: 400;
-  line-height: 1.6;
+  line-height: 1.65;
   letter-spacing: 0.01em;
 }
 
@@ -21,10 +24,10 @@ body {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  color: #4a5d73;
+  color: #49525b;
   background: #f1faee;
   font-size: 15px;
-  line-height: 1.6;
+  line-height: 1.65;
   letter-spacing: 0.01em;
 }
 
@@ -33,8 +36,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  height: 60px;
-  padding: 0 28px;
+  height: 64px;
+  padding: 0 32px;
   line-height: 1;
   background: #1a2332;
 }
@@ -59,8 +62,8 @@ body {
   border-radius: 8px;
   display: grid;
   place-items: center;
-  background: rgba(168, 218, 220, 0.22);
-  color: #a8dadc;
+  background: #a8dadc;
+  color: #1a2332;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0;
@@ -86,8 +89,8 @@ body {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: rgba(168, 218, 220, 0.22);
-  color: #a8dadc;
+  background: #a8dadc;
+  color: #1a2332;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0;
@@ -96,7 +99,7 @@ body {
 .header-link {
   border: 0;
   background: transparent;
-  color: rgba(241, 250, 238, 0.82);
+  color: rgba(241, 250, 238, 0.88);
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
@@ -111,7 +114,7 @@ body {
 
 .app-sider {
   background: #fff !important;
-  border-right: 1px solid #d5e4e2;
+  border-right: 1px solid #2d8b8b;
 }
 
 .app-sider .ant-menu {
@@ -121,13 +124,16 @@ body {
 
 .app-sider .ant-menu-item,
 .app-sider .ant-menu-item a {
+  font-size: 14px;
   font-weight: 500;
   letter-spacing: 0.01em;
+  line-height: 1.4;
 }
 
 .app-sider .ant-menu-item-selected,
 .app-sider .ant-menu-item-selected a {
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .app-sider a {
@@ -146,7 +152,7 @@ body {
 
 .panel {
   background: #fff;
-  border: 1px solid #d5e4e2;
+  border: 1px solid #2d8b8b;
   border-radius: 12px;
   padding: 24px 28px;
 }
@@ -180,11 +186,15 @@ body {
 }
 
 .panel-head a {
-  color: #227272;
+  color: #1a2332;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.01em;
   line-height: 1.4;
+  text-decoration: underline;
+  text-decoration-color: #2d8b8b;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
 }
 
 .toolbar {
@@ -201,14 +211,14 @@ body {
 
 .stat-card {
   background: #fff;
-  border: 1px solid #d5e4e2;
+  border: 1px solid #2d8b8b;
   border-radius: 12px;
   padding: 22px 24px 20px;
 }
 
 .stat-card span {
   display: block;
-  color: #4a5d73;
+  color: #49525b;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.04em;
@@ -234,10 +244,10 @@ body {
 
 .quiet,
 .ant-typography.quiet {
-  color: #4a5d73;
+  color: #49525b;
   font-size: 13px;
   font-weight: 400;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
   line-height: 1.55;
 }
 
@@ -264,7 +274,7 @@ body {
 .report-row {
   display: block;
   padding: 14px 0;
-  border-top: 1px solid #d5e4e2;
+  border-top: 1px solid #a8dadc;
   color: inherit;
   line-height: 1.5;
 }
@@ -298,7 +308,7 @@ body {
 .tab-row {
   display: flex;
   gap: 24px;
-  border-bottom: 1px solid #d5e4e2;
+  border-bottom: 1px solid #2d8b8b;
   margin: 0 0 20px;
   overflow-x: auto;
 }
@@ -307,7 +317,7 @@ body {
   border: 0;
   background: transparent;
   padding: 0 0 12px;
-  color: #4a5d73;
+  color: #49525b;
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
@@ -317,7 +327,7 @@ body {
 }
 
 .tab.active {
-  color: #227272;
+  color: #1a2332;
   font-weight: 700;
   box-shadow: inset 0 -2px 0 #2d8b8b;
 }
@@ -337,8 +347,43 @@ body {
 
 .ant-table-placeholder > .ant-table-cell,
 .ant-empty-description {
-  color: #4a5d73 !important;
+  color: #49525b !important;
   font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.ant-btn {
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+
+.ant-form-item-label > label {
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-select-selection-item,
+.ant-select-selection-placeholder {
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+.ant-table-tbody > tr > td {
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: 0.005em;
+}
+
+.ant-modal .ant-modal-title {
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.35;
+}
+
+.ant-menu-title-content,
+.app-sider .ant-menu-item {
   letter-spacing: 0.01em;
 }
 
@@ -358,6 +403,19 @@ body {
   }
 
   .app-content {
-    padding: 16px;
+    padding: 20px 16px 36px;
+  }
+
+  .ant-layout-header.app-header {
+    padding: 0 16px;
+    gap: 12px;
+  }
+
+  .stat-card strong {
+    font-size: 28px;
+  }
+
+  .panel {
+    padding: 20px 16px;
   }
 }
