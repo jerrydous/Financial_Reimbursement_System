@@ -1,3 +1,5 @@
+/* Ocean Depths（theme-factory）：海军蓝正文、奶油底、青绿强调。中文回落到 Noto Sans CJK SC。 */
+
 html,
 body,
 #root {
@@ -6,38 +8,47 @@ body,
 
 body {
   margin: 0;
-  background: #f4f6fb;
-  color: #1f2329;
+  background: #f1faee;
+  color: #1a2332;
+  font-family: "DejaVu Sans", "Noto Sans CJK SC", sans-serif;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
 }
 
 .boot {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  color: #646a73;
-  background: #f4f6fb;
+  color: #4a5d73;
+  background: #f1faee;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
 }
 
 .ant-layout-header.app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  height: 56px;
-  padding: 0 20px;
+  gap: 20px;
+  height: 60px;
+  padding: 0 28px;
   line-height: 1;
-  background: #2f6bff;
+  background: #1a2332;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
-  color: #fff;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  color: #f1faee;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
@@ -48,8 +59,11 @@ body {
   border-radius: 8px;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(168, 218, 220, 0.22);
+  color: #a8dadc;
   font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
   line-height: 1;
   white-space: nowrap;
 }
@@ -57,9 +71,12 @@ body {
 .header-user {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex: 0 0 auto;
-  color: #fff;
+  color: #f1faee;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   line-height: 1;
 }
 
@@ -69,31 +86,48 @@ body {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(168, 218, 220, 0.22);
+  color: #a8dadc;
   font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .header-link {
   border: 0;
   background: transparent;
-  color: rgba(255, 255, 255, 0.92);
+  color: rgba(241, 250, 238, 0.82);
   cursor: pointer;
   font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
   padding: 0;
 }
 
 .header-link:hover {
-  color: #fff;
+  color: #f1faee;
 }
 
 .app-sider {
   background: #fff !important;
-  border-right: 1px solid #eef0f4;
+  border-right: 1px solid #d5e4e2;
 }
 
 .app-sider .ant-menu {
   border-inline-end: 0 !important;
-  padding: 12px 8px;
+  padding: 16px 10px;
+}
+
+.app-sider .ant-menu-item,
+.app-sider .ant-menu-item a {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.app-sider .ant-menu-item-selected,
+.app-sider .ant-menu-item-selected a {
+  font-weight: 600;
 }
 
 .app-sider a {
@@ -101,34 +135,56 @@ body {
 }
 
 .app-content {
-  padding: 20px 24px 32px;
+  padding: 28px 32px 48px;
 }
 
 .page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
 }
 
 .panel {
   background: #fff;
+  border: 1px solid #d5e4e2;
   border-radius: 12px;
-  padding: 20px 24px;
+  padding: 24px 28px;
 }
 
 .panel-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
+  align-items: baseline;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 20px;
 }
 
-.panel-head h3,
+.panel-head > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+
+.panel h3,
 .section-title {
+  margin: 0 0 12px;
+  color: #1a2332;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.35;
+}
+
+.panel-head h3 {
   margin: 0;
-  font-size: 16px;
+  white-space: nowrap;
+}
+
+.panel-head a {
+  color: #227272;
+  font-size: 14px;
   font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
 }
 
 .toolbar {
@@ -140,37 +196,90 @@ body {
 .stat-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 20px;
 }
 
 .stat-card {
   background: #fff;
+  border: 1px solid #d5e4e2;
   border-radius: 12px;
-  padding: 18px 20px;
+  padding: 22px 24px 20px;
 }
 
 .stat-card span {
   display: block;
-  color: #8a919f;
+  color: #4a5d73;
   font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1.45;
 }
 
 .stat-card strong {
   display: block;
-  margin-top: 8px;
-  font-size: 28px;
-  font-weight: 600;
-  line-height: 1.2;
+  margin-top: 10px;
+  color: #1a2332;
+  font-size: 32px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
 
 .home-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
-  gap: 16px;
+  gap: 20px;
 }
 
-.quiet {
-  color: #8a919f;
+.quiet,
+.ant-typography.quiet {
+  color: #4a5d73;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.55;
+}
+
+.empty-note,
+.ant-typography.empty-note {
+  margin: 56px 0;
+  text-align: center;
+}
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.identity-name {
+  color: #1a2332;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  line-height: 1.35;
+}
+
+.report-row {
+  display: block;
+  padding: 14px 0;
+  border-top: 1px solid #d5e4e2;
+  color: inherit;
+  line-height: 1.5;
+}
+
+.report-row-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+
+.report-row-meta {
+  margin-top: 4px;
 }
 
 .detail-bar {
@@ -188,31 +297,49 @@ body {
 
 .tab-row {
   display: flex;
-  gap: 20px;
-  border-bottom: 1px solid #eef0f4;
-  margin: -4px 0 16px;
+  gap: 24px;
+  border-bottom: 1px solid #d5e4e2;
+  margin: 0 0 20px;
   overflow-x: auto;
 }
 
 .tab {
   border: 0;
   background: transparent;
-  padding: 0 0 10px;
-  color: #646a73;
+  padding: 0 0 12px;
+  color: #4a5d73;
   cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
   white-space: nowrap;
 }
 
 .tab.active {
-  color: #2f6bff;
-  box-shadow: inset 0 -2px 0 #2f6bff;
+  color: #227272;
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 #2d8b8b;
 }
 
 .ledger-bar {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 16px;
+  margin-top: 20px;
+}
+
+.ant-table-thead > tr > th {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ant-table-placeholder > .ant-table-cell,
+.ant-empty-description {
+  color: #4a5d73 !important;
+  font-size: 13px;
+  letter-spacing: 0.01em;
 }
 
 /* antd 5 的进出动画在 React 19 上会停在起始帧，提示一直是透明的 */

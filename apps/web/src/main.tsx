@@ -21,15 +21,36 @@ createRoot(root).render(
         button={{ autoInsertSpace: false }}
         theme={{
           token: {
-            colorPrimary: '#2f6bff',
+            colorPrimary: '#1a2332',
+            colorLink: '#227272',
+            colorInfo: '#2d8b8b',
+            colorText: '#1a2332',
+            colorTextSecondary: '#4a5d73',
+            colorBgLayout: '#f1faee',
+            colorBorder: '#d5e4e2',
+            colorBorderSecondary: '#d5e4e2',
             borderRadius: 8,
-            colorBgLayout: '#f4f6fb',
-            fontFamily: '"Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+            fontFamily: '"DejaVu Sans", "Noto Sans CJK SC", sans-serif',
+            fontSize: 15,
+            fontSizeSM: 13,
+            fontSizeLG: 16,
+            fontSizeHeading3: 18,
+            fontSizeHeading4: 16,
+            lineHeight: 1.6,
+            fontWeightStrong: 700,
           },
           components: {
-            Layout: { headerBg: '#2f6bff', siderBg: '#ffffff', bodyBg: '#f4f6fb', headerHeight: 56 },
-            Menu: { itemSelectedBg: '#eef3ff', itemSelectedColor: '#2f6bff', itemBorderRadius: 8, itemHeight: 40 },
-            Table: { headerBg: '#f7f8fa' },
+            Layout: { headerBg: '#1a2332', siderBg: '#ffffff', bodyBg: '#f1faee', headerHeight: 60 },
+            Menu: {
+              itemColor: '#1a2332',
+              itemSelectedBg: '#e5f4f2',
+              itemSelectedColor: '#227272',
+              itemHoverBg: '#f3faf8',
+              itemBorderRadius: 8,
+              itemHeight: 42,
+            },
+            Table: { headerBg: '#f4faf8', headerColor: '#1a2332', headerSplitColor: '#d5e4e2' },
+            Button: { fontWeight: 600, primaryColor: '#f1faee', primaryShadow: 'none', defaultShadow: 'none' },
           },
         }}
       >
