@@ -207,7 +207,7 @@ function HomePage({
         </article>
         <article className="stat-card">
           <span>当前岗位</span>
-          <strong style={{ fontSize: 22 }}>{employee ? roleLabel[employee.role] ?? employee.role : '未登录'}</strong>
+          <strong>{employee ? roleLabel[employee.role] ?? employee.role : '未登录'}</strong>
         </article>
       </div>
       <div className="home-grid">
@@ -217,17 +217,17 @@ function HomePage({
             <Link to="/expense-reports">查看全部</Link>
           </div>
           {recent.length === 0 ? (
-            <Typography.Paragraph className="quiet" style={{ textAlign: 'center', margin: '48px 0' }}>
+            <Typography.Paragraph className="quiet empty-note">
               {authenticated ? '还没有报销单。从左上角提一张即可。' : '登录后可以在这里看到自己的单据。'}
             </Typography.Paragraph>
           ) : (
             recent.map((item) => (
-              <Link key={item.id} to={`/expense-reports/${item.id}`} style={{ display: 'block', padding: '12px 0', borderTop: '1px solid #f2f3f5', color: 'inherit' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <Link key={item.id} className="report-row" to={`/expense-reports/${item.id}`}>
+                <div className="report-row-main">
                   <span>单号 {shortNo(item.id)}</span>
                   <span className="quiet">{statusLabel[item.status] ?? item.status}</span>
                 </div>
-                <div className="quiet" style={{ marginTop: 4 }}>{formatWhen(item.createdAt)}</div>
+                <div className="quiet report-row-meta">{formatWhen(item.createdAt)}</div>
               </Link>
             ))
           )}
@@ -237,8 +237,8 @@ function HomePage({
             <h3>当前身份</h3>
           </div>
           {employee ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, lineHeight: 1.6 }}>
-              <div>{employee.name}</div>
+            <div className="identity">
+              <div className="identity-name">{employee.name}</div>
               <div className="quiet">{roleLabel[employee.role] ?? employee.role}</div>
               <div>{employee.company.name}</div>
               <div className="quiet">税号 {employee.company.taxId}</div>
