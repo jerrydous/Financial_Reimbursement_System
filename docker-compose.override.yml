@@ -1,0 +1,30 @@
+# 本机 5432 已被其他 PostgreSQL 占用，只改宿主机端口。容器内仍是 5432。
+# 官方 MinIO 镜像在当前镜像站被拒绝，对象存储改用 SeaweedFS 的 S3 接口。
+services:
+  postgres:
+    ports: !override
+      - "5433:5432"
+  minio:
+    image: docker.m.daocloud.io/chrislusf/seaweedfs:latest
+    entrypoint: ["/entrypoint.sh"]
+    command:
+      - mini
+      - -dir=/data
+      - -s3
+      - -s3.port=9000
+      - -s3.config=/etc/seaweedfs/s3.json
+      - -bucket=invoices
+    volumes:
+      - ./infra/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+  temporal:
+    environment:
+      BIND_ON_IP: 0.0.0.0
+  api:
+    environment:
+      S3_ENDPOINT: http://localhost:9000

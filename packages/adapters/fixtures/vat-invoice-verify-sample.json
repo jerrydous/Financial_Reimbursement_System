@@ -1,0 +1,8 @@
+{
+  "Invoice": {
+    "Number": "10001",
+    "BuyerName": "示例公司",
+    "BuyerTaxCode": "91330100EXAMPLE001"
+  },
+  "RequestId": "recorded-verify-1"
+}

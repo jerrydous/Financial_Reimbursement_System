@@ -1,0 +1,38 @@
+import { describe, expect, it } from 'vitest';
+import { addFen, amountTextToMinor, compareFen, fenToString, fenToYuanText, minorToAmountText, parseFen, yuanTextToFen } from './money';
+
+describe('金额以整数分计算', () => {
+  it('拒绝小数、科学计数和前导零', () => {
+    expect(() => parseFen('1.2')).toThrow(/整数字符串/);
+    expect(() => parseFen('1e2')).toThrow(/整数字符串/);
+    expect(() => parseFen('01')).toThrow(/整数字符串/);
+    expect(() => parseFen('')).toThrow(/整数字符串/);
+  });
+
+  it('0.1 元加 0.2 元等于 30 分，结果是 bigint', () => {
+    const sum = addFen(parseFen('10'), parseFen('20'));
+    expect(typeof sum).toBe('bigint');
+    expect(sum).toBe(30n);
+    expect(fenToString(sum)).toBe('30');
+    expect(compareFen(sum, parseFen('30'))).toBe(0);
+    expect(compareFen(sum, parseFen('31'))).toBe(-1);
+  });
+
+  it('元的文本按分换算，0.10 加 0.20 等于 30 分', () => {
+    const sum = addFen(yuanTextToFen('0.10'), yuanTextToFen('0.20'));
+    expect(sum).toBe(30n);
+    expect(typeof sum).toBe('bigint');
+    expect(fenToYuanText(sum)).toBe('0.30');
+    expect(() => yuanTextToFen('1.2')).toThrow(/两位小数/);
+    expect(() => yuanTextToFen('1')).toThrow(/两位小数/);
+  });
+
+  it('外币按票面最小单位换算，日元不乘 100', () => {
+    expect(amountTextToMinor('12.30', 'USD')).toBe(1230n);
+    expect(minorToAmountText(amountTextToMinor('12.30', 'EUR'), 'EUR')).toBe('12.30');
+    const yen = amountTextToMinor('1200', 'JPY');
+    expect(yen).toBe(1200n);
+    expect(minorToAmountText(yen, 'JPY')).toBe('1200');
+    expect(() => amountTextToMinor('12.30', 'JPY')).toThrow(/整数/);
+  });
+});

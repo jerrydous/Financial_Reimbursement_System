@@ -1,0 +1,120 @@
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import {
+  assertCanBindSubject,
+  assertSameSubject,
+  IdentityError,
+  type AccessTokenClaims,
+} from '@frs/domain';
+import { employeeViewSchema, type EmployeeView } from '@frs/contracts';
+import { PrismaService } from '../prisma.service';
+
+const employeeInclude = { company: true } as const;
+
+type EmployeeRecord = {
+  id: string;
+  username: string;
+  name: string;
+  email: string;
+  role: string;
+  keycloakSubject: string | null;
+  company: { id: string; name: string; taxId: string };
+};
+
+@Injectable()
+export class EmployeeService {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async getOwn(claims: AccessTokenClaims): Promise<EmployeeView> {
+    const existing = await this.prisma.employee.findUnique({
+      where: { keycloakSubject: claims.subject },
+      include: employeeInclude,
+    });
+    if (existing) {
+      try {
+        assertSameSubject(claims.subject, existing.keycloakSubject ?? '');
+      } catch (error) {
+        throw asForbidden(error);
+      }
+      return toView(existing);
+    }
+
+    const byUsername = await this.prisma.employee.findUnique({
+      where: { username: claims.username },
+      include: employeeInclude,
+    });
+    if (!byUsername) {
+      throw new ForbiddenException({
+        code: 'EMPLOYEE_NOT_FOUND',
+        message: '当前账号没有员工身份',
+      });
+    }
+    try {
+      assertCanBindSubject(byUsername.keycloakSubject, claims.subject);
+    } catch (error) {
+      throw asForbidden(error);
+    }
+    const claimed = await this.prisma.employee.updateMany({
+      where: { id: byUsername.id, keycloakSubject: null },
+      data: { keycloakSubject: claims.subject },
+    });
+    const current = await this.prisma.employee.findUniqueOrThrow({
+      where: { id: byUsername.id },
+      include: employeeInclude,
+    });
+    if (claimed.count === 0) {
+      try {
+        assertCanBindSubject(current.keycloakSubject, claims.subject);
+        assertSameSubject(claims.subject, current.keycloakSubject ?? '');
+      } catch (error) {
+        throw asForbidden(error);
+      }
+    }
+    return toView(current);
+  }
+
+  async listColleagues(actorId: string): Promise<{
+    items: { id: string; name: string; role: 'employee' | 'manager' | 'finance' | 'cashier' }[];
+  }> {
+    const self = await this.prisma.employee.findUnique({ where: { id: actorId } });
+    if (!self) {
+      return { items: [] };
+    }
+    const rows = await this.prisma.employee.findMany({
+      where: { companyId: self.companyId, NOT: { id: actorId } },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, role: true },
+    });
+    return {
+      items: rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        role: row.role as 'employee' | 'manager' | 'finance' | 'cashier',
+      })),
+    };
+  }
+}
+
+function asForbidden(error: unknown): unknown {
+  if (error instanceof IdentityError) {
+    return new ForbiddenException({
+      code: error.code,
+      message: '当前登录与员工身份不一致',
+    });
+  }
+  return error;
+}
+
+function toView(employee: EmployeeRecord): EmployeeView {
+  return employeeViewSchema.parse({
+    id: employee.id,
+    username: employee.username,
+    name: employee.name,
+    email: employee.email,
+    role: employee.role,
+    company: {
+      id: employee.company.id,
+      name: employee.company.name,
+      taxId: employee.company.taxId,
+    },
+  });
+}
