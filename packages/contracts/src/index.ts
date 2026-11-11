@@ -52,6 +52,7 @@ export const expenseReportStatusSchema = z.enum([
   'draft',
   'submitted',
   'approving',
+  'needs_info',
   'finance_review',
   'paying',
   'paid',
@@ -72,6 +73,9 @@ export const expenseReportActionSchema = z.enum([
   'pay_fail',
   'revise',
   'skip_to_finance',
+  'request_supplement',
+  'resubmit_manager',
+  'resubmit_finance',
 ]);
 
 /** 票面币种。金额仍按该币种的最小单位保存，不在币种之间换算。 */
@@ -133,6 +137,15 @@ export const auditViewSchema = z.object({
   createdAt: z.string().datetime(),
 });
 
+export const requestSupplementSchema = z.object({ reason: z.string().trim().min(1).max(2000) }).strict();
+export const resubmitSupplementSchema = z.object({
+  explanation: z.string().trim().min(1).max(4000),
+  materialUrls: z.array(z.string().url().max(2000).refine(value => /^https:\/\//i.test(value), '材料链接必须使用 HTTPS')).max(10).default([]),
+}).strict();
+export const supplementEntrySchema = z.object({
+  action: z.enum(['request_supplement', 'resubmit_manager', 'resubmit_finance']),
+  actorId: z.string(), text: z.string(), materialUrls: z.array(z.string()), createdAt: z.string(),
+});
 export const expenseReportDetailSchema = z.object({
   id: z.string().uuid(),
   employeeId: z.string().uuid(),
@@ -146,6 +159,7 @@ export const expenseReportDetailSchema = z.object({
   currentActorId: z.string().nullable(),
   approvalMode: z.enum(['single', 'any', 'all']),
   canAct: z.boolean().default(false),
+  supplementHistory: z.array(supplementEntrySchema).default([]),
   subsidyFen: fenStringSchema,
   createdAt: z.string().datetime(),
   invoices: z.array(invoiceViewSchema),

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { v7 as uuidv7 } from 'uuid';
 import { WorkflowNotRunning, enforceDocumentPolicy, type ExpenseDecisionSignal } from '@frs/adapters';
-import { currencyCodeSchema, type ExpenseReportDetail } from '@frs/contracts';
+import { requestSupplementSchema, resubmitSupplementSchema, currencyCodeSchema, type ExpenseReportDetail } from '@frs/contracts';
 import {
   DomainError,
   ExpenseReportError,
@@ -181,6 +181,16 @@ export class ExpenseReportCommands {
     }
   }
 
+  async supplement(employeeId: string, reportId: string, kind: 'request' | 'resubmit', body: unknown): Promise<ExpenseReportDetail> {
+    const request = kind === 'request' ? requestSupplementSchema.parse(body) : resubmitSupplementSchema.parse(body);
+    const report = await this.prisma.expenseReport.findUnique({where:{id:reportId}});
+    if (!report) throw new ExpenseReportError('REPORT_NOT_FOUND','报销单不存在');
+    const action = kind === 'request' ? 'request_supplement' : report.resumeStatus === 'approving' ? 'resubmit_manager' : 'resubmit_finance';
+    const detail = await this.apply({reportId, actorId:employeeId, action, workflowId:null, supplement:request});
+    await this.notifyWorkflow(reportId, employeeId, {action, actorId:employeeId, alreadyApplied:true, status:detail.status});
+    return detail;
+  }
+
   async adjust(employeeId: string, reportId: string, approvedAmountFen: string): Promise<ExpenseReportDetail> {
     return this.apply({
       reportId,
@@ -196,10 +206,14 @@ export class ExpenseReportCommands {
     action: ExpenseReportAction;
     actorId: string;
     workflowId: string | null;
+    supplement?: { reason?: string; explanation?: string; materialUrls?: string[] };
     approvedAmountFen?: string;
     transferToEmployeeId?: string | null;
     idempotencyKey?: string | null;
   }): Promise<ExpenseReportDetail> {
+    if (input.action === 'pay_success' || input.action === 'pay_fail') {
+      throw new ExpenseReportError('ACTOR_FORBIDDEN', '支付结果只能由已核验的支付网关写入');
+    }
     const detail = await this.prisma.$transaction((tx) => this.applyOnce(tx, input));
     logger.info({
       documentId: input.reportId,
@@ -208,6 +222,25 @@ export class ExpenseReportCommands {
       action: input.action,
     });
     return detail;
+  }
+
+  async settleGatewayPayment(
+    tx: Prisma.TransactionClient,
+    input: { reportId: string; action: 'pay_success' | 'pay_fail'; actorId: string; workflowId: null; idempotencyKey: string },
+  ): Promise<ExpenseReportDetail> {
+    const order = await tx.payoutOrder.findUnique({ where: { id: input.idempotencyKey } });
+    if (!order || order.reportId !== input.reportId || order.actorId !== input.actorId ||
+        order.status !== (input.action === 'pay_success' ? 'succeeded' : 'failed') || !order.providerReference) {
+      throw new ExpenseReportError('ACTOR_FORBIDDEN', '支付单未核验');
+    }
+    return this.applyOnce(tx, input);
+  }
+
+  async notifyPaymentWorkflow(reportId: string, actorId: string, status: string, key: string): Promise<void> {
+    await this.notifyWorkflow(reportId, actorId, {
+      action: status === 'succeeded' ? 'pay_success' : 'pay_fail', actorId,
+      idempotencyKey: key, alreadyApplied: true, status: status === 'succeeded' ? 'paid' : 'paying',
+    });
   }
 
   async getVisible(actorId: string, reportId: string): Promise<ExpenseReportDetail> {
@@ -582,6 +615,7 @@ export class ExpenseReportCommands {
       action: ExpenseReportAction;
       actorId: string;
       workflowId: string | null;
+      supplement?: { reason?: string; explanation?: string; materialUrls?: string[] };
       approvedAmountFen?: string;
       transferToEmployeeId?: string | null;
       idempotencyKey?: string | null;
@@ -612,6 +646,36 @@ export class ExpenseReportCommands {
     if (progressed[input.action]?.includes(status)) {
       return loadReport(tx, report.id);
     }
+    const supplementActions = ['request_supplement', 'resubmit_manager', 'resubmit_finance'];
+    const isSupplement = supplementActions.includes(input.action);
+    let supplementData: Prisma.ExpenseReportUpdateManyMutationInput = {};
+    if (isSupplement) {
+      let text: string;
+      let materialUrls: string[] = [];
+      if (input.action === 'request_supplement') {
+        const parsed = requestSupplementSchema.safeParse(input.supplement);
+        if (!parsed.success) throw new ExpenseReportError('REQUEST_INVALID', '退回补充必须填写原因（最多2000字）');
+        text = parsed.data.reason;
+        if (report.status === 'approving' && report.approvalMode !== 'single') {
+          const principals = report.assignments.map(item => item.actorId);
+          const today = todayInShanghai();
+          const proxies = await tx.approvalProxy.findMany({where:{enabled:true, principalId:{in:principals}, startsOn:{lte:today}, endsOn:{gte:today}}});
+          const principal = mayVote({mode:report.approvalMode === 'all' ? 'all':'any', actorId:input.actorId, principals,
+            proxies:proxies.map(p=>({principalId:p.principalId,agentId:p.agentId}))});
+          if (!report.votes.some(v=>v.actorId===principal && v.decision==='pending')) throw new ExpenseReportError('ACTOR_FORBIDDEN','仅待审核人员可退回补充');
+        }
+        supplementData = {resumeStatus: status, resumeActorId: report.currentActorId};
+      } else {
+        assertActor(report.employeeId, input.actorId);
+        const expected = report.resumeStatus === 'approving' ? 'resubmit_manager' : report.resumeStatus === 'finance_review' ? 'resubmit_finance' : null;
+        if (input.action !== expected) throw new ExpenseReportError('INVALID_TRANSITION','补交必须返回原审核节点');
+        const parsed = resubmitSupplementSchema.safeParse(input.supplement);
+        if (!parsed.success) throw new ExpenseReportError('REQUEST_INVALID','请填写补充说明，材料链接须为HTTPS');
+        text = parsed.data.explanation; materialUrls = parsed.data.materialUrls;
+      }
+      const history = Array.isArray(report.supplementHistory) ? report.supplementHistory : [];
+      supplementData.supplementHistory = [...history, {action:input.action,actorId:input.actorId,text,materialUrls,createdAt:new Date().toISOString()}] as Prisma.InputJsonValue;
+    }
     let action: ExpenseReportAction = input.action;
     if ((input.action === 'approve' || input.action === 'reject') && report.approvalMode !== 'single') {
       const folded = await this.foldGroupVote(tx, report, input.action, input.actorId);
@@ -629,6 +693,8 @@ export class ExpenseReportCommands {
         return loadReport(tx, report.id);
       }
       action = folded;
+    } else if (input.action === 'request_supplement' && status === 'approving' && report.approvalMode !== 'single') {
+      transitionExpenseReport(status, input.action);
     } else if (this.isSharedDesk(status, input.action)) {
       if (report.currentActorId !== input.actorId) {
         await this.assertDeskColleague(tx, status === 'paying' ? 'cashier' : 'finance', report.employee.companyId, input.actorId);
@@ -657,7 +723,7 @@ export class ExpenseReportCommands {
     }
     let finance: { id: string }[] = [];
     let cashiers: { id: string }[] = [];
-    if (action === 'approve' || action === 'finance_approve' || action === 'start_approval' || action === 'skip_to_finance') {
+    if (action === 'resubmit_finance' || action === 'resubmit_manager' || action === 'approve' || action === 'finance_approve' || action === 'start_approval' || action === 'skip_to_finance') {
       finance = await this.requireCompanyRole(tx, 'finance', report.employee.companyId);
       cashiers = await this.requireCompanyRole(tx, 'cashier', report.employee.companyId);
     }
@@ -681,6 +747,10 @@ export class ExpenseReportCommands {
         throw new ExpenseReportError('INVALID_TRANSITION', '当前状态不能转交');
       }
       transferTo = target.id;
+    }
+    if (action !== 'pay_success' && action !== 'pay_fail' &&
+        await tx.payoutOrder.findUnique({ where: { reportId: report.id } })) {
+      throw new ExpenseReportError('INVALID_TRANSITION', '已建立支付单，必须先核对支付结果，不能修改或撤回');
     }
     const next = transitionExpenseReport(status, action);
     const approved = report.approvedAmountFen === null ? null : parseFen(report.approvedAmountFen.toString());
@@ -717,6 +787,8 @@ export class ExpenseReportCommands {
     if (action === 'start_approval' && report.approvalMode !== 'single') {
       nextActor = report.assignments[0]?.actorId ?? nextActor;
     }
+    if (action === 'request_supplement') nextActor = null;
+    if (action === 'resubmit_manager' || action === 'resubmit_finance') nextActor = report.resumeActorId;
     if (action === 'pay_success') {
       if (!approved || nextAmount.toString() !== approved.toString()) {
         throw new ExpenseReportError('AMOUNT_MISMATCH', '付款金额必须等于批准金额');
@@ -726,6 +798,7 @@ export class ExpenseReportCommands {
     const updated = await tx.expenseReport.updateMany({
       where: { id: report.id, version: report.version },
       data: {
+        ...supplementData,
         status: next,
         version: { increment: 1 },
         amountFen: nextAmount,
@@ -754,10 +827,17 @@ export class ExpenseReportCommands {
       });
       await releaseReportControls(tx, report.id);
     }
+    if (action === 'request_supplement') await this.revokeDecide(tx, report.id);
+    if (action === 'resubmit_manager') {
+      await tx.approvalVote.deleteMany({where:{reportId:report.id}});
+      await this.openManagerStep(tx, report.approvalMode === 'single'
+        ? {...report, employee: {...report.employee, managerId: report.resumeActorId}}
+        : report);
+    }
     if (action === 'start_approval') {
       await this.openManagerStep(tx, report);
     }
-    if ((action === 'skip_to_finance' || action === 'approve') && finance.length > 0) {
+    if ((action === 'resubmit_finance' || action === 'skip_to_finance' || action === 'approve') && finance.length > 0) {
       await this.revokeDecide(tx, report.id);
       for (const person of finance) {
         await this.grant(tx, person.id, report.id, 'read', report.id);
@@ -895,7 +975,7 @@ export class ExpenseReportCommands {
   }
 
   private isSharedDesk(status: string, action: ExpenseReportAction): boolean {
-    if (status === 'finance_review' && (action === 'finance_approve' || action === 'finance_adjust' || action === 'reject' || action === 'transfer')) {
+    if (status === 'finance_review' && (action === 'finance_approve' || action === 'finance_adjust' || action === 'request_supplement' || action === 'reject' || action === 'transfer')) {
       return true;
     }
     return status === 'paying' && (action === 'pay_success' || action === 'pay_fail' || action === 'transfer');

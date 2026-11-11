@@ -25,6 +25,7 @@ export const roleLabel: Record<string, string> = {
 };
 
 export const statusLabel: Record<string, string> = {
+  needs_info: '待补充',
   draft: '草稿',
   submitted: '已提交',
   approving: '审批中',
@@ -46,6 +47,9 @@ export const statusLabel: Record<string, string> = {
 };
 
 export const actionLabel: Record<string, string> = {
+  request_supplement: '退回补充',
+  resubmit_manager: '补交至主管',
+  resubmit_finance: '补交至财务',
   submit: '提交',
   start_approval: '开始审批',
   approve: '同意',
@@ -68,7 +72,7 @@ export const verificationLabel: Record<string, string> = {
   failed: '验真未通过',
 };
 
-const activeStatuses = new Set(['submitted', 'approving', 'finance_review', 'paying']);
+const activeStatuses = new Set(['needs_info', 'submitted', 'approving', 'finance_review', 'paying']);
 
 export function isActiveStatus(status: string): boolean {
   return activeStatuses.has(status);

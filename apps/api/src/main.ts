@@ -18,7 +18,7 @@ process.on('unhandledRejection', (reason) => {
 
 async function main(): Promise<void> {
   installKeycloakInternalRoute();
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: ['error', 'warn'] });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { logger: ['error', 'warn'], rawBody: true });
   app.use(requestLog);
   app.useGlobalFilters(new ApiExceptionFilter());
   const prefix = process.env.API_GLOBAL_PREFIX?.trim().replace(/^\/+|\/+$/g, '');

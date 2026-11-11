@@ -3,7 +3,7 @@ import { expenseReportListSchema, pageOffset, type ExpenseReportList } from '@fr
 import { todayInShanghai } from '../calendar';
 import { PrismaService } from '../prisma.service';
 
-const handledActions = ['approve', 'reject', 'transfer', 'skip_to_finance', 'finance_adjust', 'finance_approve', 'pay_success', 'pay_fail'];
+const handledActions = ['request_supplement', 'approve', 'reject', 'transfer', 'skip_to_finance', 'finance_adjust', 'finance_approve', 'pay_success', 'pay_fail'];
 
 @Injectable()
 export class ExpenseReportsService {

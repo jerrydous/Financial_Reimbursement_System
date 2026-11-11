@@ -32,6 +32,7 @@ export async function loadReport(tx: ReportTx, reportId: string): Promise<Expens
     id: report.id,
     employeeId: report.employeeId,
     status: report.status,
+    supplementHistory: report.supplementHistory,
     amountFen: report.amountFen.toString(),
     submittedAmountFen: report.submittedAmountFen?.toString() ?? null,
     approvedAmountFen: report.approvedAmountFen?.toString() ?? null,

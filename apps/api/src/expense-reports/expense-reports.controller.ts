@@ -12,12 +12,15 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  requestSupplementSchema,
+  resubmitSupplementSchema,
   createExpenseReportSchema,
   expenseReportListSchema,
   financeAdjustmentSchema,
   pageQuerySchema,
   transferSchema,
 } from '@frs/contracts';
+import { PaymentService } from '../payments/payment-service';
 import type { ExpenseReportAction } from '@frs/domain';
 import { AuthGuard, type AuthenticatedRequest } from '../auth/auth.guard';
 import { EmployeeService } from '../employee/employee.service';
@@ -32,6 +35,7 @@ export class ExpenseReportsController {
     @Inject(EmployeeService) private readonly employees: EmployeeService,
     @Inject(ExpenseReportsService) private readonly reports: ExpenseReportsService,
     @Inject(ExpenseReportCommands) private readonly commands: ExpenseReportCommands,
+    @Inject(PaymentService) private readonly payments: PaymentService,
   ) {}
 
   @Get('expense-reports')
@@ -121,6 +125,22 @@ export class ExpenseReportsController {
     }
   }
 
+  @Post('expense-reports/:id/request-supplement')
+  async requestSupplement(@Req() request: AuthenticatedRequest, @Param('id') id: string, @Body() body: unknown) {
+    const parsed = requestSupplementSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException({code:'REQUEST_INVALID',message:'请填写退回补充原因'});
+    const employee = await this.employees.getOwn(request.claims);
+    try { return await this.commands.supplement(employee.id,id,'request',parsed.data); } catch(error) { rethrowAsHttp(error); }
+  }
+
+  @Post('expense-reports/:id/resubmit-supplement')
+  async resubmitSupplement(@Req() request: AuthenticatedRequest, @Param('id') id: string, @Body() body: unknown) {
+    const parsed = resubmitSupplementSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException({code:'REQUEST_INVALID',message:'补充说明或材料链接不合法'});
+    const employee = await this.employees.getOwn(request.claims);
+    try { return await this.commands.supplement(employee.id,id,'resubmit',parsed.data); } catch(error) { rethrowAsHttp(error); }
+  }
+
   @Post('expense-reports/:id/approve')
   approve(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     return this.signal(request, id, 'approve', {});
@@ -171,14 +191,12 @@ export class ExpenseReportsController {
   }
 
   @Post('expense-reports/:id/payments')
-  pay(
-    @Req() request: AuthenticatedRequest,
-    @Param('id') id: string,
-    @Headers('idempotency-key') idempotencyKey: string | undefined,
-    @Body() body: { outcome?: string },
-  ) {
-    const action: ExpenseReportAction = body?.outcome === 'failed' ? 'pay_fail' : 'pay_success';
-    return this.signal(request, id, action, { idempotencyKey });
+  async pay(@Req() request: AuthenticatedRequest, @Param('id') id: string, @Body() body: unknown) {
+    if (body && typeof body === 'object' && Object.keys(body).length > 0) {
+      throw new BadRequestException({ code: 'REQUEST_INVALID', message: '不能由客户端声明支付结果' });
+    }
+    const employee = await this.employees.getOwn(request.claims);
+    return this.payments.pay(employee.id, id);
   }
 
   private async signal(

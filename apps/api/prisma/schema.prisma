@@ -71,6 +71,9 @@ model ExpenseReport {
   employeeId          String             @map("employee_id")
   employee            Employee           @relation(fields: [employeeId], references: [id])
   status              String
+  supplementHistory   Json               @default("[]") @map("supplement_history")
+  resumeStatus        String?            @map("resume_status")
+  resumeActorId       String?            @map("resume_actor_id")
   amountFen           BigInt             @map("amount_fen")
   currency            String             @default("CNY")
   submittedAmountFen  BigInt?            @map("submitted_amount_fen")
@@ -602,4 +605,18 @@ model ExportJob {
 
   @@unique([tenantId, idempotencyKey])
   @@map("export_jobs")
+}
+
+model PayoutOrder {
+  id String @id
+  reportId String @unique @map("report_id")
+  actorId String @map("actor_id")
+  amountFen BigInt @map("amount_fen")
+  currency String
+  status String @default("pending")
+  providerReference String? @map("provider_reference")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("payout_orders")
 }

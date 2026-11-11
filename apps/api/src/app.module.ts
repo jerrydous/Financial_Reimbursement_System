@@ -1,3 +1,5 @@
+import { PaymentService } from './payments/payment-service';
+import { PaymentCallbackController } from './payments/payment-callback.controller';
 import { Module } from '@nestjs/common';
 import {
   KeycloakAccessTokenVerifier,
@@ -29,6 +31,7 @@ import { PrismaService } from './prisma.service';
 @Module({
   controllers: [
     HealthController,
+    PaymentCallbackController,
     OpenApiController,
     EmployeeController,
     ExpenseReportsController,
@@ -40,6 +43,7 @@ import { PrismaService } from './prisma.service';
   ],
   providers: [
     PrismaService,
+    PaymentService,
     EmployeeService,
     ExpenseReportsService,
     VerificationSettingsCommands,

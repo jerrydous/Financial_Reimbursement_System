@@ -531,6 +531,9 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
   });
   const [transferOpen, setTransferOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
+  const [supplementOpen, setSupplementOpen] = useState<'request' | 'resubmit' | null>(null);
+  const [supplementText, setSupplementText] = useState('');
+  const [materialUrls, setMaterialUrls] = useState('');
   const [transferTo, setTransferTo] = useState<string>();
   const [approvedYuan, setApprovedYuan] = useState('');
   const [amountError, setAmountError] = useState('');
@@ -544,6 +547,9 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
     onSuccess: async () => {
       setTransferOpen(false);
       setAdjustOpen(false);
+      setSupplementOpen(null);
+      setSupplementText('');
+      setMaterialUrls('');
       setAmountError('');
       await client.invalidateQueries({ queryKey: ['expense-report', id] });
       await client.invalidateQueries({ queryKey: ['expense-reports'] });
@@ -573,7 +579,10 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
           </div>
           <div className="detail-actions">
             {actions.primary ? (
-              <Button type="primary" loading={act.isPending} onClick={() => void runAction(actions.primary, act.mutateAsync)}>
+              <Button type="primary" loading={act.isPending} onClick={() => {
+                if (actions.primary?.key === 'resubmit-supplement') { setSupplementOpen('resubmit'); return; }
+                runAction(actions.primary, act.mutateAsync);
+              }}>
                 {actions.primary.label}
               </Button>
             ) : null}
@@ -586,6 +595,7 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
                     if (!item) {
                       return;
                     }
+                    if (item.key === 'request-supplement') { setSupplementOpen('request'); return; }
                     if (item.key === 'transfer') {
                       setTransferOpen(true);
                       return;
@@ -649,6 +659,33 @@ export function ReportDetailPage({ actorId }: { actorId: string | undefined }) {
           ]}
         />
       </section>
+      <section className="panel">
+        <h3>补充记录</h3>
+        {current.supplementHistory.map((entry, index) => (
+          <div key={index} style={{ marginBottom: 12 }}>
+            <strong>{actionLabel[entry.action]} · {formatWhen(entry.createdAt)}</strong>
+            <div style={{ whiteSpace: 'pre-wrap' }}>{entry.text}</div>
+            {entry.materialUrls.map((url, n) => <div key={n}><a href={url} target="_blank" rel="noopener noreferrer">材料 {n + 1}</a></div>)}
+          </div>
+        ))}
+        {!current.supplementHistory.length ? <div className="quiet">暂无补充记录</div> : null}
+      </section>
+      <Modal title={supplementOpen === 'request' ? '退回补充' : '补充后重新提交'}
+        open={supplementOpen !== null} confirmLoading={act.isPending}
+        onCancel={() => setSupplementOpen(null)}
+        onOk={() => {
+          if (!supplementText.trim()) { message.warning('请填写原因或补充说明'); return; }
+          const urls = materialUrls.split('\n').map(value => value.trim()).filter(Boolean);
+          void act.mutateAsync({action: supplementOpen === 'request' ? 'request-supplement' : 'resubmit-supplement',
+            body: supplementOpen === 'request' ? {reason:supplementText} : {explanation:supplementText,materialUrls:urls}});
+        }}>
+        <Input.TextArea value={supplementText} onChange={event => setSupplementText(event.target.value)}
+          maxLength={supplementOpen === 'request' ? 2000 : 4000} rows={4} placeholder="请填写具体原因或补充说明" />
+        {supplementOpen === 'resubmit' ? <>
+          <p>可补交说明和 HTTPS 材料链接；原发票、金额不变，补交后返回原审核节点。</p>
+          <Input.TextArea value={materialUrls} onChange={event => setMaterialUrls(event.target.value)} rows={3} placeholder="材料链接，每行一个，最多10个" />
+        </> : null}
+      </Modal>
       <Modal
         title="转交"
         open={transferOpen}
@@ -712,6 +749,9 @@ type DetailAction = {
 function detailActions(current: ExpenseReportDetail, mine: boolean, owner: boolean): { primary: DetailAction | null; more: DetailAction[] } {
   const more: DetailAction[] = [];
   let primary: DetailAction | null = null;
+  if (current.status === 'needs_info' && owner) {
+    primary = {key:'resubmit-supplement', label:'补充并重新提交'};
+  }
   if (current.status === 'draft' && owner) {
     primary = { key: 'submit', label: '提交', action: 'submit', keySuffix: 'submit' };
   }
@@ -723,12 +763,13 @@ function detailActions(current: ExpenseReportDetail, mine: boolean, owner: boole
     more.push({ key: 'adjust', label: '调整批准金额' });
   }
   if (current.status === 'paying' && mine) {
-    primary = { key: 'pay', label: '确认支付', action: 'payments', body: { outcome: 'succeeded' }, keySuffix: 'pay' };
+    primary = { key: 'pay', label: '发起付款 / 查询结果', action: 'payments', body: {}, keySuffix: 'pay' };
   }
   if ((current.status === 'rejected' || current.status === 'withdrawn') && owner) {
     primary = { key: 'revise', label: '改回草稿', action: 'revise' };
   }
   if ((current.status === 'approving' || current.status === 'finance_review') && mine) {
+    more.push({key:'request-supplement', label:'退回补充'});
     more.push({ key: 'reject', label: '驳回', danger: true, action: 'reject' });
   }
   if ((current.status === 'submitted' || current.status === 'approving') && owner) {

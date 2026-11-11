@@ -12,6 +12,7 @@ export const expenseReportStatuses = [
   'draft',
   'submitted',
   'approving',
+  'needs_info',
   'finance_review',
   'paying',
   'paid',
@@ -34,6 +35,9 @@ export const expenseReportActions = [
   'pay_fail',
   'revise',
   'skip_to_finance',
+  'request_supplement',
+  'resubmit_manager',
+  'resubmit_finance',
 ] as const;
 
 export type ExpenseReportAction = (typeof expenseReportActions)[number];
@@ -52,6 +56,10 @@ type Transition = {
  * 转交不新增层级，只替换当前步骤的操作者。规格只写了「转交」这个动作，没有写挑选规则，这里按该假设执行。
  */
 export const expenseReportTransitions: readonly Transition[] = [
+  { from: 'approving', action: 'request_supplement', to: 'needs_info' },
+  { from: 'finance_review', action: 'request_supplement', to: 'needs_info' },
+  { from: 'needs_info', action: 'resubmit_manager', to: 'approving' },
+  { from: 'needs_info', action: 'resubmit_finance', to: 'finance_review' },
   { from: 'draft', action: 'submit', to: 'submitted' },
   { from: 'submitted', action: 'start_approval', to: 'approving' },
   { from: 'submitted', action: 'skip_to_finance', to: 'finance_review' },
@@ -74,6 +82,7 @@ export const expenseReportTransitions: readonly Transition[] = [
 const terminalStatuses = new Set<ExpenseReportStatus>(['paid', 'rejected', 'withdrawn']);
 
 const statusName: Record<ExpenseReportStatus, string> = {
+  needs_info: '待补充',
   draft: '草稿',
   submitted: '已提交',
   approving: '主管审批',
@@ -85,6 +94,9 @@ const statusName: Record<ExpenseReportStatus, string> = {
 };
 
 const actionName: Record<ExpenseReportAction, string> = {
+  request_supplement: '退回补充',
+  resubmit_manager: '补交至主管',
+  resubmit_finance: '补交至财务',
   submit: '提交',
   start_approval: '开始审批',
   approve: '主管同意',
@@ -143,7 +155,7 @@ export function actorForAction(
 ): string {
   // 终态没有当前操作者。先拒绝非法迁移，避免支付成功后的改金额被误报成「没有操作者」。
   transitionExpenseReport(status, action);
-  if (action === 'submit' || action === 'revise' || action === 'withdraw') {
+  if (action === 'resubmit_manager' || action === 'resubmit_finance' || action === 'submit' || action === 'revise' || action === 'withdraw') {
     return assignment.ownerId;
   }
   if (action === 'start_approval' || action === 'skip_to_finance') {
